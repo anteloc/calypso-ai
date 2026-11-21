@@ -1,0 +1,39 @@
+# Calypso configuration, read from calypso.toml next to main.py.
+#
+# [[commands]]: what Calypso can do. Jev picks the command whose description fits what
+# you asked for; Calypso says its ack and runs it.
+#   run          a shell command line (/bin/sh): redirections, pipes and $HOME work.
+#                What you asked for ("what's the time?") is in the variable speech:
+#                use "$speech", quoted. It is data, never run as code.
+#   ack          what Calypso says as she runs it; leave it out or blank to say nothing
+#   description  what the command is for; Jev matches requests against this alone
+
+[[commands]]
+run = "open -a calculator"
+ack = "Opening calculator"
+description = "to perform basic and advanced arithmetic operations, solving equations, graphing functions, and evaluating trigonometric expressions."
+
+[[commands]]
+run = "open -a calendar"
+ack = "Opening calendar"
+description = "to track tasks, schedule appointments, record deadlines, and organize time by days, weeks, and months."
+
+[[commands]]
+run = "shortcuts run 'Calypso - Play Spotify'"
+ack = "Playing Spotify"
+description = "to play music, songs, albums and playlists from Spotify."
+
+[[commands]]
+run = "shortcuts run 'Calypso - Search on the Internet'"
+ack = "Searching on the Internet, what should I search for? "
+description = "to search or find on the Internet, information, get answers to questions and get news"
+
+[[commands]]
+run = "shortcuts run 'Calypso - Date and Time'"
+ack = ""
+description = "to provide the current date and/or time"
+
+[[commands]]
+run = 'echo  "$speech" > /tmp/speech.txt && open /tmp/speech.txt'
+ack = "Here is what you just said"
+description = "to show what someone just said"
