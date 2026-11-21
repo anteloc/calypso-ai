@@ -30,7 +30,7 @@ Three of the commands run macOS Shortcuts: "Calypso - Play Spotify", "Calypso - 
    - Show you what you just said.
 3. She says what she's doing ("Opening calculator") and runs the command.
 
-She acts only once you've finished your sentence, so you can pause ("What's the… date today?"): she waits for the rest. If you go quiet for about 4 seconds she asks "And...?". If you stay quiet for 7 more seconds, she says "Ok, call me if you need something else" and drops the unfinished sentence.
+She acts only once you've finished your sentence, so you can pause ("What's the… date today?"): she waits for the rest. If you go quiet for about 4 seconds she asks "And...?", and whatever you say next finishes the sentence ("Search on the…" "And...?" "…Internet" searches the Internet). If you stay quiet for 7 more seconds, she says "Ok, call me if you need something else" and drops the unfinished sentence.
 
 Changed your mind? Say so in your own words ("nah, forget it", "leave it be") and she replies "Sure! We'll leave it here."
 
@@ -56,7 +56,7 @@ All the code is in [main.py](main.py), built on Moonshine's `AgentFlow`:
 - `listen_for("Calypso", converse)` starts the `converse` flow when the wake word is heard.
 - `converse` asks "Yes?" and collects what you say, asking `judge` about it after each pause.
 - `judge` asks Jev, in one request, one yes/no question (a `Noul`) per thing it needs to know: have you finished, do you want to quit, and, for each command, would it do what you ask? Calypso acts on an answer when Jev is more than 60% sure. Among the commands, the best fit wins.
-- If you quit, she leaves it. If you haven't finished, she keeps listening, however well what you've said so far fits a command.
+- If you quit, she leaves it. If you haven't finished, she keeps listening, however well what you've said so far fits a command. Each new piece is joined to what came before, and the whole sentence is judged again. Your answer to "And...?" always finishes it.
 - Once you've finished: if a command fits, she says its `ack`, the conversation ends, and `run` starts the command in the background, with your whole sentence in `$speech`. If none fits, she says "I don't know how to do that." and the conversation ends.
 - While she keeps listening, `Patience` times the silence: "And...?" after 4 seconds, giving up 7 seconds after that. It stops as soon as you start talking again.
 - She speaks with `TextToSpeech`, using language `en_gb` and voice `kokoro_bf_isabella`.

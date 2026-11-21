@@ -107,7 +107,7 @@ def judge(sentence):
     scores = [nouls[f"command {i}"].noul for i in range(len(COMMANDS))]
     best = scores.index(max(scores))
     print(
-        f"Jev: {finished:.0%} finished, {quits:.0%} quitting, "
+        f"Jev on {sentence!r}: {finished:.0%} finished, {quits:.0%} quitting, "
         f"best command {scores[best]:.0%}: {COMMANDS[best]['run']}"
     )
     command = COMMANDS[best] if scores[best] > JEV_THRESHOLD else None
@@ -134,7 +134,8 @@ class Patience(TranscriptEventListener):
     Started when Jev says the sentence isn't finished: after NUDGE_AFTER
     seconds of silence Calypso asks "And...?", and after GIVE_UP_AFTER more
     seconds of silence she drops the sentence. Stopped as soon as the user
-    starts talking again.
+    starts talking again. `nudged` tells whether she has asked "And...?"
+    since the last start().
 
     AgentFlow doesn't enforce the timeouts of ask() yet (moonshine-voice
     0.1.6), so we time the silence ourselves.
@@ -143,9 +144,11 @@ class Patience(TranscriptEventListener):
     def __init__(self, agent):
         self.agent = agent
         self.timer = None
+        self.nudged = False
 
     def start(self):
         self.stop()
+        self.nudged = False
         self.wait(NUDGE_AFTER, self.nudge)
 
     def stop(self):
@@ -157,6 +160,7 @@ class Patience(TranscriptEventListener):
         self.timer.start()
 
     def nudge(self):
+        self.nudged = True
         self.agent.say("And...?")  # Returns once she's said it.
         self.wait(GIVE_UP_AFTER, self.give_up)
 
@@ -171,15 +175,17 @@ class Patience(TranscriptEventListener):
 def converse(d, patience):
     """Flow started by the wake word: listen until the user has finished, then act on it."""
     sentence = yield d.ask("Yes?")
+    answered = False  # Whether the user has just answered "And...?".
     while True:
         finished, quits, command = judge(sentence)
         if quits:  # Checked first: "nah, forget it" is a finished sentence too.
             yield d.say("Sure! We'll leave it here.")
             return
-        if finished:
+        if finished or answered:  # What the user says after "And...?" ends the sentence.
             break
         patience.start()
         rest = yield d.ask("")  # Keep listening, without a word.
+        answered = patience.nudged
         sentence = f"{sentence} {rest}"
 
     # Finished: only now does the command Jev matched, if any, count.
