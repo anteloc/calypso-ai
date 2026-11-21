@@ -6,4 +6,5 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "moonshine-voice>=0.1.6",
+    "typesafe-sdk[zstd]>=0.7.5",
 ]
