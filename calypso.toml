@@ -21,7 +21,7 @@
 
 user_name = "Carlos"
 user_language = "en"
-assistant_name = "Tinkerbell"
+assistant_name = "Calypso"
 assistant_language = "en-gb"
 assistant_voice = "kokoro_bf_isabella"
 trigger = "Hi $assistant_name"
