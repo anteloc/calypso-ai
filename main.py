@@ -10,9 +10,12 @@ rather call it off ("nah, forget it"). If you go quiet mid-sentence she asks
 "And...?", and a little later she lets it go.
 
 Run with `uv run main.py`, with TYPESAFE_API_KEY set for Jev. The first run
-downloads the speech models.
+downloads the speech models. Add --debug to hear a tone whenever she has
+understood you (or hasn't), and to see Jev's judgments.
 """
 
+import argparse
+import logging
 import os
 import subprocess
 import threading
@@ -37,6 +40,7 @@ COMMANDS = CONFIG["commands"]
 
 
 jev = TypeSafeClient()  # Reads TYPESAFE_API_KEY.
+log = logging.getLogger("calypso")  # Debug output, shown with --debug.
 
 
 def fits(command):
@@ -106,7 +110,7 @@ def judge(sentence):
     finished, quits = nouls["finished"].noul, nouls["quits"].noul
     scores = [nouls[f"command {i}"].noul for i in range(len(COMMANDS))]
     best = scores.index(max(scores))
-    print(
+    log.debug(
         f"Jev on {sentence!r}: {finished:.0%} finished, {quits:.0%} quitting, "
         f"best command {scores[best]:.0%}: {COMMANDS[best]['run']}"
     )
@@ -200,6 +204,16 @@ def converse(d, patience):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Calypso, a voice-controlled assistant.")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="beep whenever she has understood you or not, and print Jev's judgments",
+    )
+    args = parser.parse_args()
+    logging.basicConfig(format="%(message)s")
+    log.setLevel(logging.DEBUG if args.debug else logging.INFO)
+
     # We bring our own synthesizer because AgentFlow.language() sets the
     # language for both listening and speaking. We listen in "en" but speak en_gb.
     voice = TextToSpeech().language("en_gb").voice("kokoro_bf_isabella")
@@ -215,6 +229,7 @@ def main():
         .language("en")
         .use_text_to_speech(voice)
         .use_mic_transcriber(mic)
+        .beeps(args.debug)  # The "got it" and "didn't get that" tones.
         .on_progress(lambda fraction, name: print(f"Loading {name}... {fraction:.0%}"))
         .on_heard(lambda text: print(f"You: {text}"))
         .on_said(lambda text: print(f"{NAME}: {text}"))

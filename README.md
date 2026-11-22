@@ -16,6 +16,8 @@ uv run main.py
 
 The first run downloads about 550 MB of speech models; after that, speech works offline. On macOS, allow your terminal to use the microphone when asked.
 
+To see what she makes of what you say, run `uv run main.py --debug`. She then plays a "got it" tone whenever she has understood you, and a "didn't get that" tone when she hasn't. Each of Jev's judgments is printed too, e.g. `Jev on 'Search on the Internet': 42% finished, 4% quitting, best command 98%: …`.
+
 Three of the commands run macOS Shortcuts: "Calypso - Play Spotify", "Calypso - Search on the Internet" and "Calypso - Date and Time". They must exist in the Shortcuts app.
 
 ## Talk to her
