@@ -4,7 +4,7 @@ A voice-controlled assistant, built on [Moonshine Voice](https://github.com/moon
 
 Most voice assistants guess you've finished talking when you pause, so they act on half a sentence when you stop to think. Calypso waits until you've *really* finished: Jev judges whether what you've said so far is a finished sentence. Then she runs the command that does what you asked for.
 
-Speech recognition and her voice run on your machine. Only the text of what you ask her, after "Yes?", is sent to Jev.
+Speech recognition and her voice run on your machine. Only the text of what you ask her, once she's awake, is sent to Jev.
 
 ## Run it
 
@@ -20,9 +20,35 @@ To see what she makes of what you say, run `uv run main.py --debug`. She then pl
 
 Three of the commands run macOS Shortcuts: "Calypso - Play Spotify", "Calypso - Search on the Internet" and "Calypso - Date and Time". They must exist in the Shortcuts app.
 
+## Set her up
+
+```bash
+uv run main.py --config
+```
+
+It walks you through her settings, which it saves at the top of [calypso.toml](calypso.toml). Press Enter to keep a value, or Ctrl+C to quit without saving.
+
+| Setting | What it is | Default |
+| --- | --- | --- |
+| `user_name` | Your name, optional | none |
+| `user_language` | The language you speak, which she listens in | `en` |
+| `assistant_name` | Her name | `Calypso` |
+| `assistant_language` | The language she speaks | `en-gb` |
+| `assistant_voice` | Her voice: you hear each kokoro voice for her language, saying her answers, and pick one | `kokoro_bf_isabella` |
+| `trigger` | What you say to wake her up, such as "Wake up $assistant_name" | `$assistant_name` |
+| `trigger_ack` | What she answers when woken, such as "How can I help, $user_name?" | `["Yes?"]` |
+| `nudge` | What she says when you go quiet mid-sentence, such as "So, $user_name...?" | `["And...?"]` |
+| `goodbye` | What she says when she stops waiting for the rest | `["Ok, call me if you need something else."]` |
+| `quit_ack` | What she says when you call it off | `["Sure! We'll leave it here."]` |
+| `dont_know` | What she says when no command does what you asked | `["I don't know how to do that."]` |
+
+Her phrases, the last five, are lists: give several and she picks one at random each time. In any setting, and in the commands' `ack`, `$user_name` and `$assistant_name` stand for the names, anywhere in the text (write `${user_name}` when letters follow right after). In a command's `run`, they're shell variables, like `$speech`.
+
+Last, it tests the trigger: you say it 3 times, and for each try you see what she heard and whether she woke up. If she missed any, test it again or pick another trigger. Uncommon names are often misheard, and a trigger she doesn't recognize leaves her deaf to you.
+
 ## Talk to her
 
-1. Say **"Calypso"**. She replies "Yes?".
+1. Say her trigger, **"Calypso"** unless you've changed it. She replies "Yes?", or one of the answers you gave her.
 2. Ask, in your own words, for something one of her commands does:
    - Do some maths ("What's 12 times 34?") or open the calculator.
    - Check or plan your days ("What do I have on Friday?"): opens the calendar.
@@ -38,6 +64,8 @@ Changed your mind? Say so in your own words ("nah, forget it", "leave it be") an
 
 A finished sentence that no command does gets "I don't know how to do that." Say "cancel" to stop a question halfway.
 
+These are her default phrases; you can give her your own (see [Set her up](#set-her-up)).
+
 ## Teach her something new
 
 Add a command to [calypso.toml](calypso.toml):
@@ -45,7 +73,7 @@ Add a command to [calypso.toml](calypso.toml):
 ```toml
 [[commands]]
 run = "open -a calculator"          # a shell command line; "$speech" is what you said
-ack = "Opening calculator"          # what she says as she runs it; blank for nothing
+ack = "Opening calculator"          # what she says first; blank for nothing
 description = "to perform basic and advanced arithmetic operations, ..."
 ```
 
@@ -53,19 +81,20 @@ Jev matches your requests against the `description` alone, so describe what the 
 
 ## How it works
 
-All the code is in [main.py](main.py), built on Moonshine's `AgentFlow`:
+The assistant is in [main.py](main.py), built on Moonshine's `AgentFlow`. Her settings, and the `--config` mode, are in [config.py](config.py).
 
-- `listen_for("Calypso", converse)` starts the `converse` flow when the wake word is heard.
-- `converse` asks "Yes?" and collects what you say, asking `judge` about it after each pause.
+- `listen_for(TRIGGER, converse)` starts the `converse` flow when her trigger is heard. Like Moonshine's other phrase matching, this goes by meaning, so it needn't be word for word.
+- `converse` answers with one of `TRIGGER_ACKS` and collects what you say, asking `judge` about it after each pause.
 - `judge` asks Jev, in one request, one yes/no question (a `Noul`) per thing it needs to know: have you finished, do you want to quit, and, for each command, would it do what you ask? Calypso acts on an answer when Jev is more than 60% sure. Among the commands, the best fit wins.
-- If you quit, she leaves it. If you haven't finished, she keeps listening, however well what you've said so far fits a command. Each new piece is joined to what came before, and the whole sentence is judged again. Your answer to "And...?" always finishes it.
-- Once you've finished: if a command fits, she says its `ack`, the conversation ends, and `run` starts the command in the background, with your whole sentence in `$speech`. If none fits, she says "I don't know how to do that." and the conversation ends.
-- While she keeps listening, `Patience` times the silence: "And...?" after 4 seconds, giving up 7 seconds after that. It stops as soon as you start talking again.
-- She speaks with `TextToSpeech`, using language `en_gb` and voice `kokoro_bf_isabella`.
+- If you quit, she leaves it. If you haven't finished, she keeps listening, however well what you've said so far fits a command. Each new piece is joined to what came before, and the whole sentence is judged again. Your answer to a nudge ("And...?") always finishes it.
+- Once you've finished: if a command fits, she says its `ack`, the conversation ends, and `run` starts the command in the background, with your whole sentence in `$speech`. If none fits, she says one of `dont_know` and the conversation ends.
+- While she keeps listening, `Patience` times the silence: a `nudge` after 4 seconds, a `goodbye` 7 seconds after that. It stops as soon as you start talking again.
+- She listens with a `MicTranscriber` in `user_language`, and speaks with a `TextToSpeech` in `assistant_language`, with `assistant_voice`.
+- The `--config` trigger test builds its agent the same way, so she recognizes the trigger there exactly as she will when running.
 
 The timings and Jev's threshold are constants at the top of [main.py](main.py). The question that matches commands, and the 0.6 threshold, come from calypso-fmr, where they were tuned on labelled requests.
 
 ## Next steps
 
 - An LLM for requests no command does, where `converse` finds no command.
-- Patience right after "Yes?": if you say nothing at all, she still waits indefinitely.
+- Patience right after she answers the trigger: if you say nothing at all, she still waits indefinitely.

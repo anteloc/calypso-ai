@@ -1,10 +1,40 @@
 # Calypso configuration, read from calypso.toml next to main.py.
+# `uv run main.py --config` walks you through the settings below, and tests the trigger.
 #
+# Settings. In text, $user_name and $assistant_name stand for their values, anywhere:
+# "So, $user_name, what else?" (write ${user_name} when letters follow right after).
+#   user_name           your name; "" for none
+#   user_language       the language you speak, which she listens in: "en", "es", "de", ...
+#   assistant_name      her name
+#   assistant_language  the language she speaks: "en-gb", "en-us", "es-es", ...
+#   assistant_voice     her voice: one of the kokoro_ voices for assistant_language
+#   trigger             what you say to wake her up
+#
+# Her phrases: each is a list, and she says one of them, picked at random.
+#   trigger_ack         what she answers when woken
+#   nudge               what she says when you go quiet mid-sentence
+#   goodbye             what she says when she stops waiting for the rest
+#   quit_ack            what she says when you call it off ("nah, forget it")
+#   dont_know           what she says when no command does what you asked
+
+user_name = ""
+user_language = "en"
+assistant_name = "Calypso"
+assistant_language = "en-gb"
+assistant_voice = "kokoro_bf_isabella"
+trigger = "$assistant_name"
+trigger_ack = ["Yes?"]
+nudge = ["And...?"]
+goodbye = ["Ok, call me if you need something else."]
+quit_ack = ["Sure! We'll leave it here."]
+dont_know = ["I don't know how to do that."]
+
 # [[commands]]: what Calypso can do. Jev picks the command whose description fits what
 # you asked for; Calypso says its ack and runs it.
 #   run          a shell command line (/bin/sh): redirections, pipes and $HOME work.
 #                What you asked for ("what's the time?") is in the variable speech:
-#                use "$speech", quoted. It is data, never run as code.
+#                use "$speech", quoted. It is data, never run as code. $user_name and
+#                $assistant_name are variables too.
 #   ack          what Calypso says as she runs it; leave it out or blank to say nothing
 #   description  what the command is for; Jev matches requests against this alone
 
