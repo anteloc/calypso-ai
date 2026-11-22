@@ -45,9 +45,12 @@ QUIT_INTENTS = [config.fill(intent, CONFIG) for intent in CONFIG["quit_intent"]]
 COMMANDS = CONFIG["commands"]
 
 
-def one_of(phrases):
-    """One of her phrases from calypso.toml, such as "nudge", picked at random."""
-    return config.one_of(CONFIG, phrases)
+def one_of(phrases, speech=""):
+    """One of her phrases from calypso.toml, such as "nudge", picked at random.
+
+    `speech`, what the user has said so far, fills in $speech.
+    """
+    return config.one_of(CONFIG, phrases, speech)
 
 
 jev = TypeSafeClient()  # Reads TYPESAFE_API_KEY.
@@ -157,7 +160,8 @@ class Patience(TranscriptEventListener):
     seconds of silence she nudges the user ("And...?"), and after GIVE_UP_AFTER
     more seconds of silence she says goodbye and drops the sentence. Stopped as
     soon as the user starts talking again. `nudged` tells whether she has
-    nudged the user since the last start().
+    nudged the user since the last start(). Her nudge and goodbye can quote
+    the unfinished sentence, as $speech.
 
     AgentFlow doesn't enforce the timeouts of ask() yet (moonshine-voice
     0.1.6), so we time the silence ourselves.
@@ -167,10 +171,12 @@ class Patience(TranscriptEventListener):
         self.agent = agent
         self.timer = None
         self.nudged = False
+        self.sentence = ""
 
-    def start(self):
+    def start(self, sentence):
         self.stop()
         self.nudged = False
+        self.sentence = sentence
         self.wait(NUDGE_AFTER, self.nudge)
 
     def stop(self):
@@ -183,11 +189,11 @@ class Patience(TranscriptEventListener):
 
     def nudge(self):
         self.nudged = True
-        self.agent.say(one_of("nudge"))  # Returns once she's said it.
+        self.agent.say(one_of("nudge", self.sentence))  # Returns once she's said it.
         self.wait(GIVE_UP_AFTER, self.give_up)
 
     def give_up(self):
-        self.agent.say(one_of("goodbye"))
+        self.agent.say(one_of("goodbye", self.sentence))
         self.agent.cancel()  # Drops the unfinished sentence.
 
     def on_line_started(self, event):
@@ -209,11 +215,11 @@ def listen(d, patience, prompt, judge):
     while True:
         finished, quits, command = judge(sentence)
         if quits:  # Checked first: "nah, forget it" is a finished sentence too.
-            yield d.say(one_of("quit_ack"))
+            yield d.say(one_of("quit_ack", sentence))
             return None, None
         if finished or answered:  # What the user says after a nudge ends the sentence.
             return sentence, command
-        patience.start()
+        patience.start(sentence)
         rest = yield d.ask("")  # Keep listening, without a word.
         answered = patience.nudged
         sentence = f"{sentence} {rest}"
@@ -228,9 +234,9 @@ def converse(d, patience):
     # Finished: only now does the command Jev matched, if any, count.
     if command is None:
         # No command does what was asked. An LLM would take over here later.
-        yield d.say(one_of("dont_know"))
+        yield d.say(one_of("dont_know", sentence))
         return
-    ack = config.fill(command.get("ack", ""), CONFIG).strip()  # Blank: she says nothing.
+    ack = config.fill(command.get("ack", ""), CONFIG, sentence).strip()  # Blank: she says nothing.
     if ack:
         yield d.say(ack)
     run(command, sentence)  # Last: the conversation ends as the command starts.

@@ -73,16 +73,16 @@ def save(settings):
     PATH.write_text(tomlkit.dumps(document))
 
 
-def fill(text, settings):
-    """`text` with $user_name and $assistant_name replaced by their values."""
+def fill(text, settings, speech=""):
+    """`text` with $user_name, $assistant_name and $speech (what the user said) filled in."""
     return Template(text).safe_substitute(
-        user_name=settings["user_name"], assistant_name=settings["assistant_name"]
+        user_name=settings["user_name"], assistant_name=settings["assistant_name"], speech=speech
     )
 
 
-def one_of(settings, key):
-    """One of her phrases for `key`, such as "nudge", picked at random, names filled in."""
-    return fill(random.choice(settings[key]), settings)
+def one_of(settings, key, speech=""):
+    """One of her phrases for `key`, such as "nudge", picked at random and filled in."""
+    return fill(random.choice(settings[key]), settings, speech)
 
 
 def kokoro_voices(language):

@@ -13,8 +13,9 @@
 #   quit_intent         examples of what you say to call a request off, in your language:
 #                       Jev recognizes anything that means the same
 #
-# Her phrases: each is a list, and she says one of them, picked at random.
-#   trigger_ack         what she answers when woken
+# Her phrases: each is a list, and she says one of them, picked at random. In them,
+# $speech is what you've said so far: "I don't know how to do that, I've heard: $speech."
+#   trigger_ack         what she answers when woken (you've said nothing yet: no $speech)
 #   nudge               what she says when you go quiet mid-sentence
 #   goodbye             what she says when she stops waiting for the rest
 #   quit_ack            what she says when you call it off ("nah, forget it")
@@ -25,13 +26,13 @@ user_language = "en"
 assistant_name = "Calypso"
 assistant_language = "en-gb"
 assistant_voice = "kokoro_bf_isabella"
-trigger = "Hi $assistant_name"
+trigger = "$assistant_name"
 quit_intent = ["nah, forget it", "leave it be", "better don't do anything"]
 trigger_ack = ["Yes $user_name?"]
 nudge = ["And...?"]
 goodbye = ["Ok, call me if you need something else."]
 quit_ack = ["Sure! We'll leave it here."]
-dont_know = ["I don't know how to do that."]
+dont_know = ["I don't know how to do that, I've heard: $speech. Call me again if you need me."]
 
 # [[commands]]: what Calypso can do. Jev picks the command whose description fits what
 # you asked for; Calypso says its ack and runs it.
@@ -39,7 +40,8 @@ dont_know = ["I don't know how to do that."]
 #                What you asked for ("what's the time?") is in the variable speech:
 #                use "$speech", quoted. It is data, never run as code. $user_name and
 #                $assistant_name are variables too.
-#   ack          what Calypso says as she runs it; leave it out or blank to say nothing
+#   ack          what Calypso says as she runs it; leave it out or blank to say nothing.
+#                $speech, $user_name and $assistant_name work here too.
 #   description  what the command is for; Jev matches requests against this alone
 
 [[commands]]
@@ -58,9 +60,18 @@ ack = "Playing Spotify"
 description = "to play music, songs, albums and playlists from Spotify."
 
 [[commands]]
-run = "shortcuts run 'Calypso - Search on the Internet'"
-ack = "Searching on the Internet, what should I search for? "
-description = "to search or find on the Internet, information, get answers to questions and get news"
+run = '''
+    sleep 1
+    calypso-cli say "What do you want me to search for?"
+    url_query="$(calypso-cli transcribe | jq -sRr @uri)"
+    search_url="https://www.google.com/search?q=${url_query}"
+    open "$search_url"
+'''
+ack = "A second..."
+description = '''
+search on the Internet, Google, Bing, any search engine, 
+in order to find relevant information on the web.
+'''
 
 [[commands]]
 run = "shortcuts run 'Calypso - Date and Time'"

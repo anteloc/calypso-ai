@@ -45,6 +45,8 @@ It walks you through her settings, which it saves at the top of [calypso.toml](c
 
 Her phrases, the last five, are lists: give several and she picks one at random each time. In any setting, and in the commands' `ack`, `$user_name` and `$assistant_name` stand for the names, anywhere in the text (write `${user_name}` when letters follow right after). In a command's `run`, they're shell variables, like `$speech`.
 
+In her phrases and the commands' `ack`, `$speech` is what you've said so far, so she can quote it: `dont_know = ["I don't know how to do that, I've heard: $speech."]`. In `nudge` and `goodbye` it's your unfinished sentence. In `trigger_ack` it's empty, as you haven't said anything yet.
+
 Last, it tests the trigger: you say it 3 times, and for each try you see what she heard and whether she woke up. If she missed any, test it again or pick another trigger. Uncommon names are often misheard, and a trigger she doesn't recognize leaves her deaf to you.
 
 ## Talk to her
@@ -91,6 +93,8 @@ calypso-cli transcribe "What should I write down?"       # say the prompt, liste
 ```
 
 `transcribe` needs no trigger. It listens until you've finished your sentence, the way she does: if you pause mid-sentence, she nudges you ("And...?") and waits for the rest. It prints the sentence to stdout and exits 0. If you call it off, or go quiet, it prints nothing and exits 1, so `&&` stops there. Everything else, like what she hears and says, goes to stderr.
+
+In a command Calypso runs, `$speech` in what `say` or `transcribe` says is your request, even inside single quotes: `calypso-cli say 'You asked: $speech'`.
 
 For example, a command that takes notes:
 

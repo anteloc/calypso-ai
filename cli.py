@@ -12,6 +12,7 @@ it. All of them use the settings in calypso.toml.
 
 import argparse
 import contextlib
+import os
 import sys
 import threading
 from functools import partial
@@ -23,6 +24,10 @@ import config
 import main as calypso
 
 START = "calypso-cli transcribe"  # Fed to the agent to start listening at once.
+
+# When Calypso runs a command, what the user asked her for: it fills in $speech
+# in what calypso-cli says, even inside single quotes.
+SPEECH = os.environ.get("speech", "")
 
 # What we ask Jev about dictation, with what she asked (if anything) as context.
 # Not Calypso's "finished" question: that one wants a complete request, and
@@ -54,12 +59,12 @@ def judge_dictation(asked, said):
 
 
 def say(text):
-    """Say `text` with her voice, $user_name and $assistant_name filled in."""
+    """Say `text` with her voice, $user_name, $assistant_name and $speech filled in."""
     settings = calypso.CONFIG
     language, voice_id = settings["assistant_language"], settings["assistant_voice"]
     with TextToSpeech().language(language).voice(voice_id) as voice:
         voice.load()
-        voice.say(config.fill(text, settings))
+        voice.say(config.fill(text, settings, SPEECH))
         voice.wait()
 
 
@@ -68,7 +73,7 @@ def transcribe(prompt, debug):
 
     Returns the sentence, or None if they called it off or went quiet.
     """
-    prompt = config.fill(prompt, calypso.CONFIG)
+    prompt = config.fill(prompt, calypso.CONFIG, SPEECH)
     heard = []
     done = threading.Event()
 

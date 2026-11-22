@@ -225,3 +225,6 @@ __marimo__/
 # Other
 prompts-local/
 .claude/
+.DS_Store
+Thumbs.db
+
