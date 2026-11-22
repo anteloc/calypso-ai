@@ -119,7 +119,10 @@ def configure():
         print("\nNothing saved.")
         return
     save(settings)
-    print(f"\nSaved in {PATH.name}. Run `uv run main.py` to talk to {settings['assistant_name']}.")
+    print(
+        f"\nSaved in {PATH.name}. Run `uv run calypso-cli assistant` (or `uv run main.py`) "
+        f"to talk to {settings['assistant_name']}."
+    )
 
 
 def ask(question, default, required=False):

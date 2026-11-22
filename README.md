@@ -11,19 +11,19 @@ Speech recognition and her voice run on your machine. Only the text of what you 
 ```bash
 export TYPESAFE_API_KEY=...   # from https://console.typesafe.ai/keys
 uv sync
-uv run main.py
+uv run calypso-cli assistant  # or: uv run main.py
 ```
 
 The first run downloads about 550 MB of speech models; after that, speech works offline. On macOS, allow your terminal to use the microphone when asked.
 
-To see what she makes of what you say, run `uv run main.py --debug`. She then plays a "got it" tone whenever she has understood you, and a "didn't get that" tone when she hasn't. Each of Jev's judgments is printed too, e.g. `Jev on 'Search on the Internet': 42% finished, 4% quitting, best command 98%: …`.
+To see what she makes of what you say, run `uv run calypso-cli --debug assistant` (or `uv run main.py --debug`). She then plays a "got it" tone whenever she has understood you, and a "didn't get that" tone when she hasn't. Each of Jev's judgments is printed too, e.g. `Jev on 'Search on the Internet': 42% finished, 4% quitting, best command 98%: …`.
 
 Three of the commands run macOS Shortcuts: "Calypso - Play Spotify", "Calypso - Search on the Internet" and "Calypso - Date and Time". They must exist in the Shortcuts app.
 
 ## Set her up
 
 ```bash
-uv run main.py --config
+uv run calypso-cli config  # or: uv run main.py --config
 ```
 
 It walks you through her settings, which it saves at the top of [calypso.toml](calypso.toml). Press Enter to keep a value, or Ctrl+C to quit without saving.

@@ -1,11 +1,13 @@
-"""calypso-cli: Calypso's voice and ears, for the commands in calypso.toml.
+"""calypso-cli: Calypso, and her voice and ears for the commands in calypso.toml.
 
+    calypso-cli assistant          # run Calypso, as `uv run main.py` does
+    calypso-cli config             # set her up, as `uv run main.py --config` does
     calypso-cli say "Hello world"
     calypso-cli transcribe "What should I write down?" >> ~/notes.txt
 
 `say` speaks with her voice. `transcribe` listens, with no trigger, until
 you've finished your sentence, judged just as Calypso judges it, then prints
-it. Both use the settings in calypso.toml.
+it. All of them use the settings in calypso.toml.
 """
 
 import argparse
@@ -91,7 +93,8 @@ def transcribe(prompt, debug):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="calypso-cli", description="Calypso's voice and ears, for the commands in calypso.toml."
+        prog="calypso-cli",
+        description="Calypso, and her voice and ears for the commands in calypso.toml.",
     )
     parser.add_argument(
         "--debug",
@@ -99,6 +102,12 @@ def main():
         help="beep whenever she has understood you or not, and print Jev's judgments",
     )
     subcommands = parser.add_subparsers(dest="subcommand", required=True)
+    subcommands.add_parser(
+        "assistant", help="run Calypso: listen for her trigger and do what you ask"
+    )
+    subcommands.add_parser(
+        "config", help="set her up in calypso.toml: names, languages, voice and trigger, tested live"
+    )
     saying = subcommands.add_parser("say", help="say a text with her voice")
     saying.add_argument("text", nargs="?", help="what to say; read from stdin if left out")
     listening = subcommands.add_parser(
@@ -106,9 +115,15 @@ def main():
     )
     listening.add_argument("prompt", nargs="?", default="", help="what to say first, once listening")
     args = parser.parse_args()
-    calypso.setup(args.debug)
 
     try:
+        if args.subcommand == "config":
+            config.configure()  # No setup(): it can fix the settings setup() rejects.
+            return
+        if args.subcommand == "assistant":
+            calypso.run_assistant(args.debug)
+            return
+        calypso.setup(args.debug)
         if args.subcommand == "say":
             text = sys.stdin.read() if args.text is None else args.text
             if text.strip():

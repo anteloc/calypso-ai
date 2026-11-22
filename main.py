@@ -239,7 +239,10 @@ def converse(d, patience):
 def setup(debug):
     """Check the settings in calypso.toml, and show debug output if asked to."""
     if not CONFIG["assistant_voice"].startswith("kokoro_"):
-        raise SystemExit("calypso.toml: assistant_voice must be a kokoro_ voice (see --config).")
+        raise SystemExit(
+            "calypso.toml: assistant_voice must be a kokoro_ voice "
+            "(pick one with `calypso-cli config` or `main.py --config`)."
+        )
     if empty := [key for key in config.LISTS if not CONFIG[key]]:
         raise SystemExit(f"calypso.toml: {', '.join(empty)} need at least one phrase.")
     logging.basicConfig(format="%(message)s")
@@ -284,7 +287,24 @@ def assistant(debug=False):
         voice.close()
 
 
+def run_assistant(debug=False):
+    """Run Calypso: listen for her trigger and do what you ask, until Ctrl+C."""
+    setup(debug)
+    with assistant(debug) as (agent, patience):
+        agent.on_heard(lambda text: print(f"You: {text}"))
+        agent.listen_for(TRIGGER, partial(converse, patience=patience))
+        agent.load()
+        agent.start_listening()
+        print(f'Say "{TRIGGER}" to wake {NAME} up. Press Ctrl+C to stop.')
+        try:
+            while True:
+                time.sleep(0.1)  # Speech is handled on the audio thread.
+        except KeyboardInterrupt:
+            pass
+
+
 def main():
+    """`uv run main.py`; `calypso-cli assistant` and `calypso-cli config` do the same."""
     parser = argparse.ArgumentParser(description="Calypso, a voice-controlled assistant.")
     parser.add_argument(
         "--debug",
@@ -297,24 +317,13 @@ def main():
         help="set her up in calypso.toml: names, languages, voice and trigger, tested live",
     )
     args = parser.parse_args()
-    if args.config:
-        config.configure()
+    try:
+        if args.config:
+            config.configure()  # No setup(): it can fix the settings setup() rejects.
+        else:
+            run_assistant(args.debug)
+    finally:
         jev.close()
-        return
-    setup(args.debug)
-
-    with assistant(args.debug) as (agent, patience):
-        agent.on_heard(lambda text: print(f"You: {text}"))
-        agent.listen_for(TRIGGER, partial(converse, patience=patience))
-        agent.load()
-        agent.start_listening()
-        print(f'Say "{TRIGGER}" to wake {NAME} up. Press Ctrl+C to stop.')
-        try:
-            while True:
-                time.sleep(0.1)  # Speech is handled on the audio thread.
-        except KeyboardInterrupt:
-            pass
-    jev.close()
 
 
 if __name__ == "__main__":

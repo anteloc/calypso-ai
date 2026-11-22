@@ -1,5 +1,6 @@
 # Calypso configuration, read from calypso.toml next to main.py.
-# `uv run main.py --config` walks you through the settings below, and tests the trigger.
+# `uv run calypso-cli config` (or `uv run main.py --config`) walks you through the settings
+# below, and tests the trigger.
 #
 # Settings. In text, $user_name and $assistant_name stand for their values, anywhere:
 # "So, $user_name, what else?" (write ${user_name} when letters follow right after).
