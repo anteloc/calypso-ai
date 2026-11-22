@@ -11,3 +11,14 @@ dependencies = [
     "tomlkit>=0.15.2",
     "typesafe-sdk[zstd]>=0.7.5",
 ]
+
+[project.scripts]
+calypso-cli = "cli:main"
+
+# Installed (editable, by `uv sync`) only so that calypso-cli is a command.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "config", "cli"]

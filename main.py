@@ -17,6 +17,7 @@ set her up: her name, languages, voice and trigger.
 """
 
 import argparse
+import contextlib
 import logging
 import os
 import subprocess
@@ -193,21 +194,36 @@ class Patience(TranscriptEventListener):
         self.stop()  # The user is talking again.
 
 
-def converse(d, patience):
-    """Flow started by the trigger: listen until the user has finished, then act on it."""
-    sentence = yield d.ask(one_of("trigger_ack"))
+def listen(d, patience, prompt, judge):
+    """Listen until the user has finished their sentence, or called it off.
+
+    Part of a flow, run with `yield from`: says `prompt` (unless it's ""), then
+    collects what the user says, asking `judge` about it after each pause:
+    judge(sentence) returns (finished, quits, command), like judge() below.
+    Returns (sentence, command). If the user calls it off, she says so and it
+    returns (None, None). If they go quiet, Patience nudges them, then says
+    goodbye and ends the whole flow.
+    """
+    sentence = yield d.ask(prompt)
     answered = False  # Whether the user has just answered a nudge ("And...?").
     while True:
         finished, quits, command = judge(sentence)
         if quits:  # Checked first: "nah, forget it" is a finished sentence too.
             yield d.say(one_of("quit_ack"))
-            return
+            return None, None
         if finished or answered:  # What the user says after a nudge ends the sentence.
-            break
+            return sentence, command
         patience.start()
         rest = yield d.ask("")  # Keep listening, without a word.
         answered = patience.nudged
         sentence = f"{sentence} {rest}"
+
+
+def converse(d, patience):
+    """Flow started by the trigger: listen until the user has finished, then act on it."""
+    sentence, command = yield from listen(d, patience, one_of("trigger_ack"), judge)
+    if sentence is None:  # They called it off.
+        return
 
     # Finished: only now does the command Jev matched, if any, count.
     if command is None:
@@ -218,6 +234,54 @@ def converse(d, patience):
     if ack:
         yield d.say(ack)
     run(command, sentence)  # Last: the conversation ends as the command starts.
+
+
+def setup(debug):
+    """Check the settings in calypso.toml, and show debug output if asked to."""
+    if not CONFIG["assistant_voice"].startswith("kokoro_"):
+        raise SystemExit("calypso.toml: assistant_voice must be a kokoro_ voice (see --config).")
+    if empty := [key for key in config.LISTS if not CONFIG[key]]:
+        raise SystemExit(f"calypso.toml: {', '.join(empty)} need at least one phrase.")
+    logging.basicConfig(format="%(message)s")
+    log.setLevel(logging.DEBUG if debug else logging.INFO)
+
+
+@contextlib.contextmanager
+def assistant(debug=False):
+    """Her voice, her ears and an agent using them, all closed afterwards.
+
+    Yields (agent, patience): register a flow on the agent, then load() it and
+    start_listening(). A flow that listen()s gets `patience` to time silences.
+    """
+    # We bring our own synthesizer because AgentFlow.language() sets the
+    # language for both listening and speaking, and hers can differ from yours.
+    voice = TextToSpeech().language(CONFIG["assistant_language"]).voice(CONFIG["assistant_voice"])
+    voice.load()
+
+    # Our own microphone, so Patience hears when you start talking again.
+    # The agent listens to it instead of opening its own.
+    mic = MicTranscriber().language(CONFIG["user_language"])
+    mic.load()
+
+    agent = (
+        AgentFlow()
+        .language(CONFIG["user_language"])
+        .use_text_to_speech(voice)
+        .use_mic_transcriber(mic)
+        .beeps(debug)  # The "got it" and "didn't get that" tones.
+        .on_progress(lambda fraction, name: print(f"Loading {name}... {fraction:.0%}"))
+        .on_said(lambda text: print(f"{NAME}: {text}"))
+    )
+    patience = Patience(agent)
+    mic.add_listener(patience)
+    try:
+        yield agent, patience
+    finally:
+        patience.stop()
+        agent.close()
+        # The agent doesn't close what it didn't create.
+        mic.close()
+        voice.close()
 
 
 def main():
@@ -237,53 +301,20 @@ def main():
         config.configure()
         jev.close()
         return
-    if not CONFIG["assistant_voice"].startswith("kokoro_"):
-        raise SystemExit("calypso.toml: assistant_voice must be a kokoro_ voice (see --config).")
-    if empty := [key for key in config.LISTS if not CONFIG[key]]:
-        raise SystemExit(f"calypso.toml: {', '.join(empty)} need at least one phrase.")
-    logging.basicConfig(format="%(message)s")
-    log.setLevel(logging.DEBUG if args.debug else logging.INFO)
+    setup(args.debug)
 
-    # We bring our own synthesizer because AgentFlow.language() sets the
-    # language for both listening and speaking, and hers can differ from yours.
-    voice = TextToSpeech().language(CONFIG["assistant_language"]).voice(CONFIG["assistant_voice"])
-    voice.load()
-
-    # Our own microphone, so Patience hears when you start talking again.
-    # The agent listens to it instead of opening its own.
-    mic = MicTranscriber().language(CONFIG["user_language"])
-    mic.load()
-
-    agent = (
-        AgentFlow()
-        .language(CONFIG["user_language"])
-        .use_text_to_speech(voice)
-        .use_mic_transcriber(mic)
-        .beeps(args.debug)  # The "got it" and "didn't get that" tones.
-        .on_progress(lambda fraction, name: print(f"Loading {name}... {fraction:.0%}"))
-        .on_heard(lambda text: print(f"You: {text}"))
-        .on_said(lambda text: print(f"{NAME}: {text}"))
-    )
-    patience = Patience(agent)
-    mic.add_listener(patience)
-    agent.listen_for(TRIGGER, partial(converse, patience=patience))
-
-    agent.load()
-    agent.start_listening()
-    print(f'Say "{TRIGGER}" to wake {NAME} up. Press Ctrl+C to stop.')
-
-    try:
-        while True:
-            time.sleep(0.1)  # Speech is handled on the audio thread.
-    except KeyboardInterrupt:
-        pass
-    finally:
-        patience.stop()
-        agent.close()
-        # The agent doesn't close what it didn't create.
-        mic.close()
-        voice.close()
-        jev.close()
+    with assistant(args.debug) as (agent, patience):
+        agent.on_heard(lambda text: print(f"You: {text}"))
+        agent.listen_for(TRIGGER, partial(converse, patience=patience))
+        agent.load()
+        agent.start_listening()
+        print(f'Say "{TRIGGER}" to wake {NAME} up. Press Ctrl+C to stop.')
+        try:
+            while True:
+                time.sleep(0.1)  # Speech is handled on the audio thread.
+        except KeyboardInterrupt:
+            pass
+    jev.close()
 
 
 if __name__ == "__main__":
