@@ -36,6 +36,7 @@ It walks you through her settings, which it saves at the top of [calypso.toml](c
 | `assistant_language` | The language she speaks | `en-gb` |
 | `assistant_voice` | Her voice: you hear each kokoro voice for her language, saying her answers, and pick one | `kokoro_bf_isabella` |
 | `trigger` | What you say to wake her up, such as "Wake up $assistant_name" | `$assistant_name` |
+| `quit_intent` | Examples of what you say to call a request off, in your language. Jev recognizes anything that means the same | `["nah, forget it", "leave it be", "better don't do anything"]` |
 | `trigger_ack` | What she answers when woken, such as "How can I help, $user_name?" | `["Yes?"]` |
 | `nudge` | What she says when you go quiet mid-sentence, such as "So, $user_name...?" | `["And...?"]` |
 | `goodbye` | What she says when she stops waiting for the rest | `["Ok, call me if you need something else."]` |

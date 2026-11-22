@@ -9,6 +9,8 @@
 #   assistant_language  the language she speaks: "en-gb", "en-us", "es-es", ...
 #   assistant_voice     her voice: one of the kokoro_ voices for assistant_language
 #   trigger             what you say to wake her up
+#   quit_intent         examples of what you say to call a request off, in your language:
+#                       Jev recognizes anything that means the same
 #
 # Her phrases: each is a list, and she says one of them, picked at random.
 #   trigger_ack         what she answers when woken
@@ -17,13 +19,14 @@
 #   quit_ack            what she says when you call it off ("nah, forget it")
 #   dont_know           what she says when no command does what you asked
 
-user_name = ""
+user_name = "Carlos"
 user_language = "en"
-assistant_name = "Calypso"
+assistant_name = "Tinkerbell"
 assistant_language = "en-gb"
 assistant_voice = "kokoro_bf_isabella"
-trigger = "$assistant_name"
-trigger_ack = ["Yes?"]
+trigger = "Hi $assistant_name"
+quit_intent = ["nah, forget it", "leave it be", "better don't do anything"]
+trigger_ack = ["Yes $user_name?"]
 nudge = ["And...?"]
 goodbye = ["Ok, call me if you need something else."]
 quit_ack = ["Sure! We'll leave it here."]

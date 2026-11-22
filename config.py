@@ -30,6 +30,7 @@ DEFAULTS = {
     "assistant_language": "en-gb",
     "assistant_voice": "kokoro_bf_isabella",
     "trigger": "$assistant_name",
+    "quit_intent": ["nah, forget it", "leave it be", "better don't do anything"],
     "trigger_ack": ["Yes?"],
     "nudge": ["And...?"],
     "goodbye": ["Ok, call me if you need something else."],
@@ -46,6 +47,10 @@ PHRASES = {
     "dont_know": "What she says when no command does what you asked:",
 }
 
+# The settings that are lists of phrases: hers, and the quit_intent examples.
+LISTS = (*PHRASES, "quit_intent")
+QUIT_QUESTION = "What you say to call a request off (examples, separated by |):"
+
 TRIES = 3  # Times you say the trigger when testing it.
 TRY_FOR = 15  # Seconds she waits for each try.
 TRIGGER_QUESTION = "What you say to wake her up ($assistant_name is her name):"
@@ -54,7 +59,7 @@ TRIGGER_QUESTION = "What you say to wake her up ($assistant_name is her name):"
 def load():
     """calypso.toml's settings and commands, with defaults for missing settings."""
     settings = DEFAULTS | tomllib.loads(PATH.read_text())
-    for key in PHRASES:
+    for key in LISTS:
         if isinstance(settings[key], str):  # A single phrase is a list of one.
             settings[key] = [settings[key]]
     return settings
@@ -101,6 +106,7 @@ def configure():
             "The language she speaks:", speaking, settings["assistant_language"]
         )
         settings["trigger"] = ask(TRIGGER_QUESTION, settings["trigger"], required=True)
+        settings["quit_intent"] = ask_phrases(QUIT_QUESTION, settings["quit_intent"])
         print(
             "\nHer phrases: give several by separating them with |, and she picks one at random.\n"
             "$user_name and $assistant_name stand for the names, anywhere in a phrase."

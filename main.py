@@ -40,6 +40,7 @@ JEV_THRESHOLD = 0.6  # How sure Jev must be before she acts on its judgment.
 CONFIG = config.load()
 NAME = CONFIG["assistant_name"]
 TRIGGER = config.fill(CONFIG["trigger"], CONFIG)  # What wakes her up.
+QUIT_INTENTS = [config.fill(intent, CONFIG) for intent in CONFIG["quit_intent"]]
 COMMANDS = CONFIG["commands"]
 
 
@@ -101,7 +102,8 @@ JUDGMENTS = {
     "quits": Noul(
         instructions="Does the user want to call off their request, so the assistant does nothing?",
         criteria=NoulCriteria(
-            true="Drops it, such as 'nah, forget it', 'leave it be' or 'better don't do anything'",
+            # The examples are the user's, from calypso.toml, in their own language.
+            true="Drops it, such as " + ", ".join(f'"{intent}"' for intent in QUIT_INTENTS),
             false="Asks for something, or is still on the way to asking",
         ),
     ),
@@ -237,7 +239,7 @@ def main():
         return
     if not CONFIG["assistant_voice"].startswith("kokoro_"):
         raise SystemExit("calypso.toml: assistant_voice must be a kokoro_ voice (see --config).")
-    if empty := [key for key in config.PHRASES if not CONFIG[key]]:
+    if empty := [key for key in config.LISTS if not CONFIG[key]]:
         raise SystemExit(f"calypso.toml: {', '.join(empty)} need at least one phrase.")
     logging.basicConfig(format="%(message)s")
     log.setLevel(logging.DEBUG if args.debug else logging.INFO)
