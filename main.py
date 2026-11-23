@@ -3,7 +3,7 @@
 Say her trigger ("Calypso" by default) to get her attention, and she answers
 ("Yes?"). Then ask, in your own words, for something one of the commands in
 calypso.toml does: TypeSafe's Jev picks the command whose description fits,
-and she says its ack and runs it.
+and she follows its ask, say and run steps in order.
 
 She waits until you've finished your sentence, so you can stop to think: Jev
 also judges whether what you've said so far is finished, and whether you'd
@@ -34,10 +34,7 @@ NUDGE_AFTER = 4  # Seconds of silence before she asks "And...?".
 GIVE_UP_AFTER = 7  # Seconds of silence after "And...?" before she drops the sentence.
 JEV_THRESHOLD = 0.6  # How sure Jev must be before she acts on its judgment.
 
-# Her settings and what she can do, from calypso.toml. Each of the [[commands]]
-# has a shell command line to run, what she says as she runs it, and a
-# description Jev matches requests against. To teach her something new, add a
-# command there.
+# Match the opening request against the descriptions in calypso.toml.
 CONFIG = config.load()
 NAME = CONFIG["assistant_name"]
 TRIGGER = config.fill(CONFIG["trigger"], CONFIG)  # What wakes her up.
@@ -99,7 +96,10 @@ JUDGMENTS = {
             "The text comes from live speech recognition, so ignore its punctuation."
         ),
         criteria=NoulCriteria(
-            true="A complete question or request, such as 'what time is it'",
+            true=(
+                "A complete question or request, including asking to start an activity, "
+                "such as 'what time is it' or 'search on the internet'"
+            ),
             false="Cut off or trailing off mid-sentence, such as 'what's the' or 'can you tell me'",
         ),
     ),
@@ -123,123 +123,164 @@ def judge(sentence):
     """
     nouls = jev.system_one(state=sentence, questions=JUDGMENTS).nouls
     finished, quits = nouls["finished"].noul, nouls["quits"].noul
-    scores = [nouls[f"command {i}"].noul for i in range(len(COMMANDS))]
-    best = scores.index(max(scores))
+    command, score = max(
+        ((cmd, nouls[f"command {i}"].noul) for i, cmd in enumerate(COMMANDS)),
+        key=lambda match: match[1], default=(None, 0),
+    )
     log.debug(
         f"Jev on {sentence!r}: {finished:.0%} finished, {quits:.0%} quitting, "
-        f"best command {scores[best]:.0%}: {COMMANDS[best]['run']}"
+        f"best command {score:.0%}: {command['description'] if command else 'none'}"
     )
-    command = COMMANDS[best] if scores[best] > JEV_THRESHOLD else None
-    return finished > JEV_THRESHOLD, quits > JEV_THRESHOLD, command
+    matched = command if score > JEV_THRESHOLD else None
+    return finished > JEV_THRESHOLD, quits > JEV_THRESHOLD, matched
 
 
-def run(command, speech):
-    """Start a command's shell line in the background, with `speech` in $speech.
+# Follow-ups and standalone dictation can be complete without being requests.
+DICTATION = {
+    "finished": Noul(
+        instructions=(
+            "Read only the final words of the user's whole reply in `said`, using `asked` as context. "
+            "Has the speaker reached a natural stopping point? Earlier pauses, stutters, repetitions, "
+            "false starts, and self-corrections do not matter if they finish the thought. Ignore ASR punctuation."
+        ),
+        criteria=NoulCriteria(
+            true="The last phrase finishes the thought or gives a usable short answer to the question.",
+            false="The speaker stopped while setting up what to say next, leaving the final phrase hanging.",
+        ),
+    ),
+    "quits": JUDGMENTS["quits"],
+}
 
-    What was said reaches the shell only as the value of the speech variable,
-    so it's data, never code: quotes, ";" or "$(...)" in it are harmless. The
-    names are there too, as $user_name and $assistant_name.
-    """
-    subprocess.Popen(
-        command["run"],
-        shell=True,
-        stdin=subprocess.DEVNULL,
-        env={
-            **os.environ,
-            "speech": speech,
-            "user_name": CONFIG["user_name"],
-            "assistant_name": NAME,
-        },
-    )
+
+def judge_dictation(asked, said):
+    """Judge a copy of the answer. Keep the original transcript for the command."""
+    state = {"asked": asked, "said": said.rstrip(". ")}
+    nouls = jev.system_one(state=state, questions=DICTATION).nouls
+    finished, quits = nouls["finished"].noul, nouls["quits"].noul
+    log.debug(f"Jev on {said!r}: {finished:.0%} finished, {quits:.0%} quitting")
+    return finished > JEV_THRESHOLD, quits > JEV_THRESHOLD, None
 
 
 class Patience(TranscriptEventListener):
-    """Gives the user time to finish a sentence.
+    """Time silence while a Dialog is waiting for one fragment of a user's turn.
 
-    Started when Jev says the sentence isn't finished: after NUDGE_AFTER
-    seconds of silence she nudges the user ("And...?"), and after GIVE_UP_AFTER
-    more seconds of silence she says goodbye and drops the sentence. Stopped as
-    soon as the user starts talking again. `nudged` tells whether she has
-    nudged the user since the last start(). Her nudge and goodbye can quote
-    the unfinished sentence, as $speech.
-
-    AgentFlow doesn't enforce the timeouts of ask() yet (moonshine-voice
-    0.1.6), so we time the silence ourselves.
+    Moonshine 0.1.6 doesn't enforce ask() timeouts. Keep the pending callback
+    so an empty ASR line (noise) can resume the same reminder or goodbye.
     """
 
     def __init__(self, agent):
         self.agent = agent
+        self.lock = threading.RLock()
         self.timer = None
-        self.nudged = False
-        self.sentence = ""
+        self.pending = None
 
-    def start(self, sentence):
+    def _schedule(self, seconds, action):
+        def fire():
+            with self.lock:
+                if self.timer is timer:  # A cancelled callback may already be awake.
+                    self.timer = None
+                    action()
+
         self.stop()
-        self.nudged = False
-        self.sentence = sentence
-        self.wait(NUDGE_AFTER, self.nudge)
+        self.pending = (seconds, action)
+        timer = self.timer = threading.Timer(seconds, fire)
+        timer.daemon = True
+        timer.start()
 
     def stop(self):
-        if self.timer:
-            self.timer.cancel()
+        with self.lock:
+            if self.timer:
+                self.timer.cancel()
+                self.timer = None
+            self.pending = None
 
-    def wait(self, seconds, then):
-        self.timer = threading.Timer(seconds, then)
-        self.timer.start()
+    @contextlib.contextmanager
+    def waiting(self, prompt, sentence):
+        def give_up():
+            self.agent.say(one_of("goodbye", sentence))
+            self.agent.cancel()  # Closes the suspended flow, including this wait.
 
-    def nudge(self):
-        self.nudged = True
-        self.agent.say(one_of("nudge", self.sentence))  # Returns once she's said it.
-        self.wait(GIVE_UP_AFTER, self.give_up)
+        def remind():
+            self.agent.say(prompt if prompt and not sentence else one_of("nudge", sentence))
+            self._schedule(GIVE_UP_AFTER, give_up)
 
-    def give_up(self):
-        self.agent.say(one_of("goodbye", self.sentence))
-        self.agent.cancel()  # Drops the unfinished sentence.
+        with self.lock:
+            self._schedule(NUDGE_AFTER, remind)
+        try:
+            yield
+        finally:
+            with self.lock:
+                # "Start over" can open the next wait before disposing of this one.
+                if self.pending and self.pending[1] in (remind, give_up):
+                    self.stop()
 
     def on_line_started(self, event):
-        self.stop()  # The user is talking again.
+        timer = self.timer
+        if timer:
+            with self.lock:
+                if self.timer is timer:
+                    timer.cancel()
+                    self.timer = None
+
+    def on_line_completed(self, event):
+        if not (event.line and event.line.text and event.line.text.strip()):
+            with self.lock:
+                if self.pending and not self.timer:
+                    self._schedule(*self.pending)
 
 
 def listen(d, patience, prompt, judge):
-    """Listen until the user has finished their sentence, or called it off.
-
-    Part of a flow, run with `yield from`: says `prompt` (unless it's ""), then
-    collects what the user says, asking `judge` about it after each pause:
-    judge(sentence) returns (finished, quits, command), like judge() below.
-    Returns (sentence, command). If the user calls it off, she says so and it
-    returns (None, None). If they go quiet, Patience nudges them, then says
-    goodbye and ends the whole flow.
-    """
-    sentence = yield d.ask(prompt)
-    answered = False  # Whether the user has just answered a nudge ("And...?").
+    """Collect one turn, judging all its fragments together after every pause."""
+    if prompt:
+        yield d.say(prompt)
+    sentence = ""
     while True:
+        # Playback has finished. The user has the full silence allowance.
+        with patience.waiting(prompt, sentence):
+            fragment = yield d.ask("")
+        sentence = f"{sentence} {fragment}" if sentence else fragment
         finished, quits, command = judge(sentence)
-        if quits:  # Checked first: "nah, forget it" is a finished sentence too.
+        if quits:
             yield d.say(one_of("quit_ack", sentence))
             return None, None
-        if finished or answered:  # What the user says after a nudge ends the sentence.
+        if finished:
             return sentence, command
-        patience.start(sentence)
-        rest = yield d.ask("")  # Keep listening, without a word.
-        answered = patience.nudged
-        sentence = f"{sentence} {rest}"
 
 
-def converse(d, patience):
-    """Flow started by the trigger: listen until the user has finished, then act on it."""
-    sentence, command = yield from listen(d, patience, one_of("trigger_ack"), judge)
-    if sentence is None:  # They called it off.
+def converse(d, patience, mute):
+    """Match one opening request, then follow its steps in this same Dialog."""
+    speech, command = yield from listen(d, patience, one_of("trigger_ack"), judge)
+    if speech is None:
         return
-
-    # Finished: only now does the command Jev matched, if any, count.
     if command is None:
-        # No command does what was asked. An LLM would take over here later.
-        yield d.say(one_of("dont_know", sentence))
+        yield d.say(one_of("dont_know", speech))
         return
-    ack = config.fill(command.get("ack", ""), CONFIG, sentence).strip()  # Blank: she says nothing.
-    if ack:
-        yield d.say(ack)
-    run(command, sentence)  # Last: the conversation ends as the command starts.
+
+    answers = {}
+    for index, step in enumerate(command["steps"], 1):
+        if "ask" in step:
+            prompt = config.fill(step["ask"], CONFIG, speech, answers)
+            answer, _ = yield from listen(d, patience, prompt, partial(judge_dictation, prompt))
+            if answer is None:
+                return
+            answers[step["save_as"]] = answer
+        elif "say" in step:
+            yield d.say(config.fill(step["say"], CONFIG, speech, answers))
+        else:
+            # Only the configured script is shell source. All speech travels as data.
+            mute(True)  # Keep the script's audio out of the next ask's input queue.
+            try:
+                subprocess.run(
+                    step["run"], shell=True, check=True, stdin=subprocess.DEVNULL,
+                    env=os.environ | answers | {
+                        "speech": speech, "user_name": CONFIG["user_name"], "assistant_name": NAME,
+                    },
+                )
+            except (OSError, subprocess.CalledProcessError) as error:
+                log.error("Command %r, run step %d failed: %s", command["description"], index, error)
+                return
+            finally:
+                mute(False)
 
 
 def setup(debug):
@@ -259,8 +300,8 @@ def setup(debug):
 def assistant(debug=False):
     """Her voice, her ears and an agent using them, all closed afterwards.
 
-    Yields (agent, patience): register a flow on the agent, then load() it and
-    start_listening(). A flow that listen()s gets `patience` to time silences.
+    Yields the agent, its silence timer and the microphone's mute function.
+    Register a flow on the agent, then load() it and start_listening().
     """
     # We bring our own synthesizer because AgentFlow.language() sets the
     # language for both listening and speaking, and hers can differ from yours.
@@ -284,8 +325,9 @@ def assistant(debug=False):
     patience = Patience(agent)
     mic.add_listener(patience)
     try:
-        yield agent, patience
+        yield agent, patience, mic.mute
     finally:
+        agent.stop_listening()
         patience.stop()
         agent.close()
         # The agent doesn't close what it didn't create.
@@ -296,9 +338,9 @@ def assistant(debug=False):
 def run_assistant(debug=False):
     """Run Calypso: listen for her trigger and do what you ask, until Ctrl+C."""
     setup(debug)
-    with assistant(debug) as (agent, patience):
+    with assistant(debug) as (agent, patience, mute):
         agent.on_heard(lambda text: print(f"You: {text}"))
-        agent.listen_for(TRIGGER, partial(converse, patience=patience))
+        agent.listen_for(TRIGGER, partial(converse, patience=patience, mute=mute))
         agent.load()
         agent.start_listening()
         print(f'Say "{TRIGGER}" to wake {NAME} up. Press Ctrl+C to stop.')

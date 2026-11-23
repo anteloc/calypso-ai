@@ -18,7 +18,6 @@ import threading
 from functools import partial
 
 from moonshine_voice import TextToSpeech
-from typesafe_sdk import Noul, NoulCriteria
 
 import config
 import main as calypso
@@ -28,34 +27,6 @@ START = "calypso-cli transcribe"  # Fed to the agent to start listening at once.
 # When Calypso runs a command, what the user asked her for: it fills in $speech
 # in what calypso-cli says, even inside single quotes.
 SPEECH = os.environ.get("speech", "")
-
-# What we ask Jev about dictation, with what she asked (if anything) as context.
-# Not Calypso's "finished" question: that one wants a complete request, and
-# notes are often just "milk and eggs".
-DICTATION = {
-    "finished": Noul(
-        instructions=(
-            "Has the user finished what they're saying in `said`, rather than stopping part-way "
-            "through it? It comes from live speech recognition, so ignore its punctuation."
-        ),
-        criteria=NoulCriteria(
-            true="A complete thought, even a short one or one without a verb, such as 'call the bank' or 'tea and biscuits'",
-            false="Cut off or trailing off part-way, such as 'call the' or 'tea and'",
-        ),
-    ),
-    "quits": calypso.JUDGMENTS["quits"],
-}
-
-
-def judge_dictation(asked, said):
-    """Ask Jev whether the user has finished what they're dictating, and whether they quit."""
-    # Speech recognition ends every line with a full stop, which makes a
-    # fragment like "call the plumber on." look finished to Jev.
-    said = said.rstrip(". ")
-    nouls = calypso.jev.system_one(state={"asked": asked, "said": said}, questions=DICTATION).nouls
-    finished, quits = nouls["finished"].noul, nouls["quits"].noul
-    calypso.log.debug(f"Jev on {said!r}: {finished:.0%} finished, {quits:.0%} quitting")
-    return finished > calypso.JEV_THRESHOLD, quits > calypso.JEV_THRESHOLD, None
 
 
 def say(text):
@@ -79,12 +50,13 @@ def transcribe(prompt, debug):
 
     def take_down(d, patience):
         try:
-            sentence, _ = yield from calypso.listen(d, patience, prompt, partial(judge_dictation, prompt))
+            judge = partial(calypso.judge_dictation, prompt)
+            sentence, _ = yield from calypso.listen(d, patience, prompt, judge)
             heard.append(sentence)
         finally:  # Also when Patience gives up and ends the flow.
             done.set()
 
-    with calypso.assistant(debug) as (agent, patience):
+    with calypso.assistant(debug) as (agent, patience, _mute):
         agent.listen_for(START, partial(take_down, patience=patience))
         agent.load()
         # The mic opens first, so it's ready the moment she's said the prompt

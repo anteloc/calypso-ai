@@ -34,51 +34,52 @@ goodbye = ["Ok, call me if you need something else."]
 quit_ack = ["Sure! We'll leave it here."]
 dont_know = ["I don't know how to do that, I've heard: $speech. Call me again if you need me."]
 
-# [[commands]]: what Calypso can do. Jev picks the command whose description fits what
-# you asked for; Calypso says its ack and runs it.
-#   run          a shell command line (/bin/sh): redirections, pipes and $HOME work.
-#                What you asked for ("what's the time?") is in the variable speech:
-#                use "$speech", quoted. It is data, never run as code. $user_name and
-#                $assistant_name are variables too.
-#   ack          what Calypso says as she runs it; leave it out or blank to say nothing.
-#                $speech, $user_name and $assistant_name work here too.
-#   description  what the command is for; Jev matches requests against this alone
+# Describe what each command does for Jev. Calypso follows its steps in order.
+# ask collects a finished answer under save_as. Later ask, say and run steps
+# can use it as $name. In run scripts, quote shell variables like "$query".
+# $speech is the opening request throughout the command.
 
 [[commands]]
-run = "open -a calculator"
-ack = "Opening calculator"
 description = "to perform basic and advanced arithmetic operations, solving equations, graphing functions, and evaluating trigonometric expressions."
+steps = [
+    { say = "Opening calculator" },
+    { run = "open -a calculator" },
+]
 
 [[commands]]
-run = "open -a calendar"
-ack = "Opening calendar"
 description = "to track tasks, schedule appointments, record deadlines, and organize time by days, weeks, and months."
+steps = [
+    { say = "Opening calendar" },
+    { run = "open -a calendar" },
+]
 
 [[commands]]
-run = "/Applications/Spotify.app/Contents/MacOS/spotify_cli play"
-ack = "Playing Spotify"
 description = "to play music, songs, albums and playlists from Spotify."
+steps = [
+    { say = "Playing Spotify" },
+    { run = "/Applications/Spotify.app/Contents/MacOS/spotify_cli play" },
+]
 
 [[commands]]
-run = '''
-    sleep 1
-    calypso-cli say "What do you want me to search for?"
-    url_query="$(calypso-cli transcribe | jq -sRr @uri)"
-    search_url="https://www.google.com/search?q=${url_query}"
-    open "$search_url"
-'''
-ack = "A second..."
-description = '''
-search on the Internet, Google, Bing, any search engine, 
-in order to find relevant information on the web.
-'''
+description = "Search on the Internet, Google, Bing, or any search engine to find information on the web."
+steps = [
+    { ask = "What do you want me to search for?", save_as = "query" },
+    { say = "A second..." },
+    { run = '''
+        encoded=$(printf '%s' "$query" | jq -sRr @uri) &&
+            open "https://www.google.com/search?q=$encoded"
+    ''' },
+]
 
 [[commands]]
-run = "shortcuts run 'Calypso - Date and Time'"
-ack = ""
 description = "to provide the current date and/or time"
+steps = [
+    { run = "shortcuts run 'Calypso - Date and Time'" },
+]
 
 [[commands]]
-run = 'echo  "$speech" > /tmp/speech.txt && open /tmp/speech.txt'
-ack = "Here is what you just said"
 description = "to show what someone just said"
+steps = [
+    { say = "Here is what you just said" },
+    { run = '''printf '%s\n' "$speech" > /tmp/speech.txt && open /tmp/speech.txt''' },
+]

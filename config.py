@@ -5,6 +5,7 @@ In text settings, $user_name and $assistant_name stand for their values (see fil
 
 import queue
 import random
+import re
 import tomllib
 from pathlib import Path
 from string import Template
@@ -62,7 +63,46 @@ def load():
     for key in LISTS:
         if isinstance(settings[key], str):  # A single phrase is a list of one.
             settings[key] = [settings[key]]
+    validate_commands(settings.setdefault("commands", []))
     return settings
+
+
+def validate_commands(commands):
+    """Check the step list before building Jev's command-matching questions."""
+    if not isinstance(commands, list):
+        raise SystemExit(f"{PATH.name}: define commands with [[commands]].")
+    for number, command in enumerate(commands, 1):
+        where = f"{PATH.name}: command {number}"
+        if not isinstance(command, dict):
+            raise SystemExit(f"{where}: expected a command table.")
+        if "ack" in command or "run" in command:
+            raise SystemExit(
+                f"{where}: move command-level ack and run into steps "
+                "as a say step (for a spoken ack) and a run step."
+            )
+        if not isinstance(command.get("description"), str) or not command["description"].strip():
+            raise SystemExit(f"{where}: provide a description for Jev to match.")
+        if not isinstance(command.get("steps"), list) or not command["steps"]:
+            raise SystemExit(f"{where}: provide a nonempty steps list.")
+
+        names = {"speech", "user_name", "assistant_name"}
+        for index, step in enumerate(command["steps"], 1):
+            at = f"{where}, step {index}"
+            if not isinstance(step, dict) or step.keys() not in ({"ask", "save_as"}, {"say"}, {"run"}):
+                raise SystemExit(f"{at}: expected ask with save_as, say, or run.")
+            if any(not isinstance(value, str) or not value.strip() for value in step.values()):
+                raise SystemExit(f"{at}: step values must be nonempty text.")
+            if "run" in step:
+                continue  # Shell scripts have their own variables and quoting rules.
+            prompt = step["ask"] if "ask" in step else step["say"]
+            for name in Template(prompt).get_identifiers():
+                if name not in names:
+                    raise SystemExit(f"{at}: ${name} is unavailable here. Save it in an earlier ask.")
+            if "ask" in step:
+                name = step["save_as"]
+                if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or name in names:
+                    raise SystemExit(f"{at}: save_as needs an unused lowercase variable name, got {name!r}.")
+                names.add(name)
 
 
 def save(settings):
@@ -73,10 +113,11 @@ def save(settings):
     PATH.write_text(tomlkit.dumps(document))
 
 
-def fill(text, settings, speech=""):
-    """`text` with $user_name, $assistant_name and $speech (what the user said) filled in."""
+def fill(text, settings, speech="", answers=None):
+    """Fill a spoken phrase once, including answers collected earlier in this command."""
     return Template(text).safe_substitute(
-        user_name=settings["user_name"], assistant_name=settings["assistant_name"], speech=speech
+        answers or {}, user_name=settings["user_name"],
+        assistant_name=settings["assistant_name"], speech=speech,
     )
 
 

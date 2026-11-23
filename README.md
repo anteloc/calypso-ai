@@ -4,7 +4,7 @@ A voice-controlled assistant, built on [Moonshine Voice](https://github.com/moon
 
 Most voice assistants guess you've finished talking when you pause, so they act on half a sentence when you stop to think. Calypso waits until you've *really* finished: Jev judges whether what you've said so far is a finished sentence. Then she runs the command that does what you asked for.
 
-Speech recognition and her voice run on your machine. Only the text of what you ask her, once she's awake, is sent to Jev.
+Speech recognition and her voice run on your machine. Once she is awake, Jev judges your transcribed requests against the command descriptions. On follow-up turns it receives the current question and your answer so far.
 
 ## Run it
 
@@ -16,9 +16,9 @@ uv run calypso-cli assistant  # or: uv run main.py
 
 The first run downloads about 550 MB of speech models; after that, speech works offline. On macOS, allow your terminal to use the microphone when asked.
 
-To see what she makes of what you say, run `uv run calypso-cli --debug assistant` (or `uv run main.py --debug`). She then plays a "got it" tone whenever she has understood you, and a "didn't get that" tone when she hasn't. Each of Jev's judgments is printed too, e.g. `Jev on 'Search on the Internet': 42% finished, 4% quitting, best command 98%: …`.
+To see what she makes of what you say, run `uv run calypso-cli --debug assistant` (or `uv run main.py --debug`). She then plays a "got it" tone whenever she has understood you, and a "didn't get that" tone when she hasn't. The log shows Jev’s completion and cancellation scores, plus the best matching description for an opening request.
 
-Three of the commands run macOS Shortcuts: "Calypso - Play Spotify", "Calypso - Search on the Internet" and "Calypso - Date and Time". They must exist in the Shortcuts app.
+The bundled commands use macOS. Search uses `jq` and `open`, Spotify uses its configured player executable, and Date and Time runs the “Calypso - Date and Time” shortcut in the Shortcuts app.
 
 ## Set her up
 
@@ -43,9 +43,9 @@ It walks you through her settings, which it saves at the top of [calypso.toml](c
 | `quit_ack` | What she says when you call it off | `["Sure! We'll leave it here."]` |
 | `dont_know` | What she says when no command does what you asked | `["I don't know how to do that."]` |
 
-Her phrases, the last five, are lists: give several and she picks one at random each time. In any setting, and in the commands' `ack`, `$user_name` and `$assistant_name` stand for the names, anywhere in the text (write `${user_name}` when letters follow right after). In a command's `run`, they're shell variables, like `$speech`.
+Give her several phrases for a response and she picks one at random. In spoken text, `$user_name` and `$assistant_name` stand for the configured names. Use `${user_name}` when letters follow immediately afterward.
 
-In her phrases and the commands' `ack`, `$speech` is what you've said so far, so she can quote it: `dont_know = ["I don't know how to do that, I've heard: $speech."]`. In `nudge` and `goodbye` it's your unfinished sentence. In `trigger_ack` it's empty, as you haven't said anything yet.
+In `nudge`, `goodbye`, `quit_ack`, and `dont_know`, `$speech` holds what you have said on the current turn. In `trigger_ack` it is empty.
 
 Last, it tests the trigger: you say it 3 times, and for each try you see what she heard and whether she woke up. If she missed any, test it again or pick another trigger. Uncommon names are often misheard, and a trigger she doesn't recognize leaves her deaf to you.
 
@@ -56,33 +56,74 @@ Last, it tests the trigger: you say it 3 times, and for each try you see what sh
    - Do some maths ("What's 12 times 34?") or open the calculator.
    - Check or plan your days ("What do I have on Friday?"): opens the calendar.
    - Play music from Spotify ("Play some jazz").
-   - Search the Internet ("Look up the population of Peru").
+   - Search the Internet ("Search on the internet"). She asks what you want to search for.
    - Tell you the date or time ("What time is it?").
    - Show you what you just said.
-3. She says what she's doing ("Opening calculator") and runs the command.
+3. She follows the matched command. For example, she says “Opening calculator” and opens it. For search, she asks for a query and waits for your answer.
 
-She acts only once you've finished your sentence, so you can pause ("What's the… date today?"): she waits for the rest. If you go quiet for about 4 seconds she asks "And...?", and whatever you say next finishes the sentence ("Search on the…" "And...?" "…Internet" searches the Internet). If you stay quiet for 7 more seconds, she says "Ok, call me if you need something else" and drops the unfinished sentence.
+> **You** — Calypso.
+>
+> **Calypso** — Yes?
+>
+> **You** — Search on the internet.
+>
+> **Calypso** — What do you want me to search for?
+>
+> **You** — I’d like to… to… find nice spots for a vacation!
+>
+> **Calypso** — A second...
 
-Changed your mind? Say so in your own words ("nah, forget it", "leave it be") and she replies "Sure! We'll leave it here."
+She opens Google with the complete answer as Moonshine transcribed it, including hesitations and corrections that appeared in the transcript. She then listens for her wake word again.
 
-A finished sentence that no command does gets "I don't know how to do that." Say "cancel" to stop a question halfway.
+After four seconds without a first word, she repeats her question once. If you pause partway through a sentence, she uses your configured nudge. When you continue, Jev judges the whole sentence again. After seven more seconds of silence, she says goodbye and drops the conversation.
 
-These are her default phrases; you can give her your own (see [Set her up](#set-her-up)).
+You can call it off in your own words (“nah, forget it”) or use Moonshine’s “cancel”. A finished opening request with no matching command gets the configured `dont_know` response.
 
 ## Teach her something new
 
-Add a command to [calypso.toml](calypso.toml):
+Each `[[commands]]` entry in [calypso.toml](calypso.toml) has a `description` and a nonempty `steps` list. Describe what the command does so Jev can recognize when someone asks for it.
+
+| Step | What happens |
+| --- | --- |
+| `ask` with `save_as` | Speak a question and wait for a finished answer. Its name is available immediately to every following step. |
+| `say` | Speak the text with the available variables filled in. |
+| `run` | Run a shell line or multiline script with `/bin/sh`. Calypso mutes her microphone during the script and continues on success. A failure is reported in the terminal and ends the command. |
+
+The search command asks for a query, then opens the result in your browser.
 
 ```toml
 [[commands]]
-run = "open -a calculator"          # a shell command line; "$speech" is what you said
-ack = "Opening calculator"          # what she says first; blank for nothing
-description = "to perform basic and advanced arithmetic operations, ..."
+description = "Search the internet for information."
+steps = [
+    { ask = "What do you want me to search for?", save_as = "query" },
+    { say = "A second..." },
+    { run = '''
+        encoded=$(printf '%s' "$query" | jq -sRr @uri) &&
+            open "https://www.google.com/search?q=$encoded"
+    ''' },
+]
 ```
 
-Jev matches your requests against the `description` alone, so describe what the command is *for*. What you said reaches the command only as the `speech` variable: quote it, `"$speech"`. It's data, never run as code.
+You can ask several questions in a row. Here, an answer of “Menorca” makes the next question “When would you like to visit Menorca?” The final script receives all three answers.
 
-### Her voice and ears in commands: calypso-cli
+```toml
+[[commands]]
+description = "Save an idea for a trip I want to take."
+steps = [
+    { ask = "Where would you like to go?", save_as = "destination" },
+    { ask = "When would you like to visit $destination?", save_as = "dates" },
+    { ask = "What would you like to do there?", save_as = "activities" },
+    { run = '''
+        printf 'Destination: %s\nDates: %s\nActivities: %s\n\n' \
+            "$destination" "$dates" "$activities" >> "$HOME/trip-ideas.txt"
+    ''' },
+    { say = "I've saved your trip idea." },
+]
+```
+
+Choose a unique `save_as` name starting with a lowercase letter, followed by lowercase letters, digits, or underscores. The names `speech`, `user_name`, and `assistant_name` are reserved. Throughout a command, `$speech` holds the opening request. Quote shell variables such as `"$query"` to pass the whole answer as one argument. Calypso supplies the values through the script’s environment. Saved answers expire at the end of the command.
+
+### Standalone speech and dictation
 
 `uv sync` installs `calypso-cli`, so commands can talk to you and listen to you, with her settings from [calypso.toml](calypso.toml):
 
@@ -96,16 +137,7 @@ calypso-cli transcribe "What should I write down?"       # say the prompt, liste
 
 In a command Calypso runs, `$speech` in what `say` or `transcribe` says is your request, even inside single quotes: `calypso-cli say 'You asked: $speech'`.
 
-For example, a command that takes notes:
-
-```toml
-[[commands]]
-run = 'calypso-cli transcribe "What should I write down?" >> ~/notes.txt && calypso-cli say "Noted."'
-ack = ""
-description = "to take a note, writing down what someone dictates"
-```
-
-Give `transcribe` its prompt rather than running `calypso-cli say` before it: it says the prompt once it's listening, so your first words aren't lost while it starts up. A prompt also helps Jev judge whether you've finished: "milk and eggs" is a finished answer to "What should I write down?".
+A prompt helps Jev judge a short answer. For example, “milk and eggs” is a finished answer to “What should I write down?”.
 
 Outside Calypso, run it with `uv run calypso-cli ...`. Add `--debug` (`calypso-cli --debug transcribe`) to see Jev's judgments.
 
@@ -116,9 +148,8 @@ The assistant is in [main.py](main.py), built on Moonshine's `AgentFlow`. Her se
 - `listen_for(TRIGGER, converse)` starts the `converse` flow when her trigger is heard. Like Moonshine's other phrase matching, this goes by meaning, so it needn't be word for word.
 - `converse` answers with one of the `trigger_ack` phrases, and `listen` collects what you say, asking `judge` about it after each pause. `calypso-cli transcribe` ([cli.py](cli.py)) uses the same `listen`, with a judgment for dictation instead of requests.
 - `judge` asks Jev, in one request, one yes/no question (a `Noul`) per thing it needs to know: have you finished, do you want to quit, and, for each command, would it do what you ask? Calypso acts on an answer when Jev is more than 60% sure. Among the commands, the best fit wins.
-- If you quit, she leaves it. If you haven't finished, she keeps listening, however well what you've said so far fits a command. Each new piece is joined to what came before, and the whole sentence is judged again. Your answer to a nudge ("And...?") always finishes it.
-- Once you've finished: if a command fits, she says its `ack`, the conversation ends, and `run` starts the command in the background, with your whole sentence in `$speech`. If none fits, she says one of `dont_know` and the conversation ends.
-- While she keeps listening, `Patience` times the silence: a `nudge` after 4 seconds, a `goodbye` 7 seconds after that. It stops as soon as you start talking again.
+- Each `ask` uses the same `listen` as the opening request, with a Jev judgment for dictation. The active Moonshine `Dialog` speaks every prompt and receives every reply using the same microphone and voice.
+- While the dialog waits for a fragment, `Patience` times the silence. Speaking, finishing the turn, or abandoning it clears its timer.
 - She listens with a `MicTranscriber` in `user_language`, and speaks with a `TextToSpeech` in `assistant_language`, with `assistant_voice`.
 - The `--config` trigger test builds its agent the same way, so she recognizes the trigger there exactly as she will when running.
 
@@ -127,5 +158,3 @@ The timings and Jev's threshold are constants at the top of [main.py](main.py). 
 ## Next steps
 
 - An LLM for requests no command does, where `converse` finds no command.
-- Patience right after she answers the trigger: if you say nothing at all, she still waits indefinitely. So does `calypso-cli transcribe`.
-- Calypso keeps listening while a command runs, so she also hears what `calypso-cli` says and what you dictate to it. That's harmless unless it sounds like her trigger.
