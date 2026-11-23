@@ -29,7 +29,7 @@ assistant_voice = "kokoro_bf_isabella"
 trigger = "$assistant_name"
 quit_intent = ["nah, forget it", "leave it be", "better don't do anything"]
 trigger_ack = ["Yes $user_name?"]
-nudge = ["And...?"]
+nudge = ["What else?"]
 goodbye = ["Ok, call me if you need something else."]
 quit_ack = ["Sure! We'll leave it here."]
 dont_know = ["I don't know how to do that, I've heard: $speech. Call me again if you need me."]
@@ -55,7 +55,7 @@ ack = "Opening calendar"
 description = "to track tasks, schedule appointments, record deadlines, and organize time by days, weeks, and months."
 
 [[commands]]
-run = "shortcuts run 'Calypso - Play Spotify'"
+run = "/Applications/Spotify.app/Contents/MacOS/spotify_cli play"
 ack = "Playing Spotify"
 description = "to play music, songs, albums and playlists from Spotify."
 
