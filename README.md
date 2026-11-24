@@ -18,7 +18,7 @@ The first run downloads about 550 MB of speech models; after that, speech works 
 
 To see what she makes of what you say, run `uv run calypso-cli --debug assistant` (or `uv run main.py --debug`). She then plays a "got it" tone whenever she has understood you, and a "didn't get that" tone when she hasn't. The log shows Jev’s completion and cancellation scores, plus the best matching description for an opening request.
 
-The bundled commands use macOS. Search uses `jq` and `open`, Spotify uses its configured player executable, and Date and Time runs the “Calypso - Date and Time” shortcut in the Shortcuts app.
+Web search uses `jq` and the default browser. Spotify uses its configured player executable. The other five commands use built-in macOS tools. If macOS asks for access on first use, screenshot capture and Reminders automation have separate controls in System Settings → Privacy & Security. [Screen recording permissions](https://support.apple.com/guide/mac-help/mchld6aa7d23/mac) · [Automation permissions](https://support.apple.com/guide/mac-help/mchl108e1718/mac)
 
 ## Set her up
 
@@ -52,14 +52,18 @@ Last, it tests the trigger: you say it 3 times, and for each try you see what sh
 ## Talk to her
 
 1. Say her trigger, **"Calypso"** unless you've changed it. She replies "Yes?", or one of the answers you gave her.
-2. Ask, in your own words, for something one of her commands does:
-   - Do some maths ("What's 12 times 34?") or open the calculator.
-   - Check or plan your days ("What do I have on Friday?"): opens the calendar.
-   - Play music from Spotify ("Play some jazz").
-   - Search the Internet ("Search on the internet"). She asks what you want to search for.
-   - Tell you the date or time ("What time is it?").
-   - Show you what you just said.
-3. She follows the matched command. For example, she says “Opening calculator” and opens it. For search, she asks for a query and waits for your answer.
+2. Ask in your own words. Try one of the requests below.
+3. Answer any follow-up question. For a web search, she asks for the exact words to send to Google.
+
+| Try saying | What Calypso does |
+| --- | --- |
+| “Could you look something up for me?” | Asks for your query and opens Google in your browser. |
+| “Play some music on Spotify.” | Starts Spotify playback. |
+| “Show me my downloads.” | Opens your Downloads folder in Finder. |
+| “Take a screenshot.” | Saves a PNG of the main display to your Desktop. |
+| “I want to dictate something to the clipboard.” | Asks what to copy. Press ⌘V to paste your answer. |
+| “Add something to my to-do list.” | Asks for the task and adds it to your default Reminders list without a due date. |
+| “Keep my Mac awake for an hour.” | Keeps the Mac and its display awake during inactivity for 60 minutes. Calypso can take other requests during that hour. |
 
 > **You** — Calypso.
 >
@@ -93,7 +97,7 @@ The search command asks for a query, then opens the result in your browser.
 
 ```toml
 [[commands]]
-description = "Search the internet for information."
+description = "Look up information on the public web when the user asks to Google something, look something up, or start a search."
 steps = [
     { ask = "What do you want me to search for?", save_as = "query" },
     { say = "A second..." },

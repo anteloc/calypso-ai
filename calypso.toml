@@ -40,28 +40,19 @@ dont_know = ["I don't know how to do that, I've heard: $speech. Call me again if
 # $speech is the opening request throughout the command.
 
 [[commands]]
-description = "to perform basic and advanced arithmetic operations, solving equations, graphing functions, and evaluating trigonometric expressions."
-steps = [
-    { say = "Opening calculator" },
-    { run = "open -a calculator" },
-]
-
-[[commands]]
-description = "to track tasks, schedule appointments, record deadlines, and organize time by days, weeks, and months."
-steps = [
-    { say = "Opening calendar" },
-    { run = "open -a calendar" },
-]
-
-[[commands]]
 description = "to play music, songs, albums and playlists from Spotify."
 steps = [
     { say = "Playing Spotify" },
-    { run = "/Applications/Spotify.app/Contents/MacOS/spotify_cli play" },
+    { run = "/Applications/Spotify.app/Contents/MacOS/spotify_cli open && sleep 3 && /Applications/Spotify.app/Contents/MacOS/spotify_cli play" },
 ]
 
 [[commands]]
-description = "Search on the Internet, Google, Bing, or any search engine to find information on the web."
+description = '''
+For searching the web: looking something up on the Internet, whether it's facts, train times,
+places, prices, how-to guides, reviews, or anything else the person wants to find online.
+This is the command for any request to search, Google, look up, or find something on the Internet,
+even when they haven't said what to search for yet.
+'''
 steps = [
     { ask = "What do you want me to search for?", save_as = "query" },
     { say = "A second..." },
@@ -72,14 +63,42 @@ steps = [
 ]
 
 [[commands]]
-description = "to provide the current date and/or time"
+description = "Open the Downloads folder in Finder so the user can see their downloaded files."
 steps = [
-    { run = "shortcuts run 'Calypso - Date and Time'" },
+    { run = 'open "$HOME/Downloads"' },
 ]
 
 [[commands]]
-description = "to show what someone just said"
+description = "Take a screenshot of the main display and save the image on the Desktop."
 steps = [
-    { say = "Here is what you just said" },
-    { run = '''printf '%s\n' "$speech" > /tmp/speech.txt && open /tmp/speech.txt''' },
+    { run = '''screencapture -mx "$HOME/Desktop/Screenshot $(date '+%Y-%m-%d at %H.%M.%S')-$$.png"''' },
+    { say = "I saved the screenshot to your Desktop." },
+]
+
+[[commands]]
+description = "Dictate text to the Mac clipboard so the user can paste their words into another app."
+steps = [
+    { ask = "What text would you like to copy?", save_as = "text" },
+    { run = '''printf '%s' "$text" | LC_ALL=en_US.UTF-8 pbcopy''' },
+    { say = "Copied. You can paste it now." },
+]
+
+[[commands]]
+description = "Add a to-do to the default list in Apple Reminders. This creates an undated task the user can check off later."
+steps = [
+    { ask = "What task should I add to Reminders?", save_as = "task" },
+    { run = '''
+        osascript -e 'on run argv
+            set taskName to item 1 of argv
+            tell application "Reminders" to make new reminder at end of reminders of default list with properties {name:taskName}
+        end run' -- "$task" >/dev/null
+    ''' },
+    { say = "Added to your reminders." },
+]
+
+[[commands]]
+description = "Keep the Mac and its display awake for one hour, for example during a presentation or download."
+steps = [
+    { run = "caffeinate -di -t 3600 >/dev/null 2>&1 &" },
+    { say = "I’ll keep your Mac awake for an hour." },
 ]
