@@ -17,7 +17,7 @@ import sys
 import threading
 from functools import partial
 
-from moonshine_voice import TextToSpeech
+from moonshine_voice import DialogRestart, TextToSpeech
 
 import config
 import main as calypso
@@ -50,9 +50,14 @@ def transcribe(prompt, debug):
 
     def take_down(d, patience):
         try:
-            judge = partial(calypso.judge_dictation, prompt)
-            sentence, _ = yield from calypso.listen(d, patience, prompt, judge)
-            heard.append(sentence)
+            while True:
+                try:
+                    sentence, _ = yield from calypso.listen(d, patience, prompt)
+                    heard.append(sentence)
+                    return
+                except DialogRestart:
+                    # Standalone dictation has one question. Keep its caller waiting.
+                    continue
         finally:  # Also when Patience gives up and ends the flow.
             done.set()
 

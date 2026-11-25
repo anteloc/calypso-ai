@@ -26,19 +26,21 @@ import time
 from functools import partial
 
 from moonshine_voice import AgentFlow, MicTranscriber, TextToSpeech, TranscriptEventListener
-from typesafe_sdk import Noul, NoulCriteria, TypeSafeClient
+from typesafe_sdk import Choice, Noul, NoulCriteria, TypeSafeClient
 
 import config
 
 NUDGE_AFTER = 4  # Seconds of silence before she asks "And...?".
 GIVE_UP_AFTER = 7  # Seconds of silence after "And...?" before she drops the sentence.
 JEV_THRESHOLD = 0.6  # How sure Jev must be before she acts on its judgment.
+MIN_COHERENCE = 0.30  # Below this, two garbled fragments warrant asking again.
 
 # Match the opening request against the descriptions in calypso.toml.
 CONFIG = config.load()
 NAME = CONFIG["assistant_name"]
 TRIGGER = config.fill(CONFIG["trigger"], CONFIG)  # What wakes her up.
 QUIT_INTENTS = [config.fill(intent, CONFIG) for intent in CONFIG["quit_intent"]]
+RESTART_INTENTS = [config.fill(intent, CONFIG) for intent in CONFIG["restart_intent"]]
 COMMANDS = CONFIG["commands"]
 
 
@@ -62,7 +64,7 @@ def fits(command):
     return Noul(
         instructions={
             "context": [
-                f"The state is what a person said to {NAME}, their voice assistant, as "
+                f"`said` is what a person said to {NAME}, their voice assistant, as "
                 "transcribed by speech recognition. Words may be misheard.",
                 f"`command` describes what one of {NAME}'s commands is for.",
             ],
@@ -86,53 +88,52 @@ def fits(command):
     )
 
 
-# What we ask Jev about what the user has said, all in one request: whether they've
-# finished, whether they quit, and, for each command, whether it's what they want.
-# A Noul answers with the probability of yes.
+# The opening request is also where Jev matches command descriptions.
 JUDGMENTS = {
     "finished": Noul(
         instructions=(
-            "Has the user finished saying what they want, so the assistant can act on it? "
-            "The text comes from live speech recognition, so ignore its punctuation."
+            "Has the speaker reached a natural stopping point in `said`? A complete request to begin an "
+            "activity is finished even if the assistant will need to ask for details. "
+            "Ignore punctuation added by speech recognition."
         ),
         criteria=NoulCriteria(
             true=(
-                "A complete question or request, including asking to start an activity, "
-                "such as 'what time is it' or 'search on the internet'"
+                "The final words complete a question, request, or statement of intent, such as "
+                "'could you look something up for me', 'add something to my to-do list', or 'what time is it'."
             ),
-            false="Cut off or trailing off mid-sentence, such as 'what's the' or 'can you tell me'",
+            false=(
+                "The final words leave the speaker mid-thought, such as 'could you look up the', "
+                "'add something to my', or 'I would like to'."
+            ),
         ),
     ),
     "quits": Noul(
-        instructions="Does the user want to call off their request, so the assistant does nothing?",
+        instructions="Does the user's latest utterance in `latest` call off the request entirely?",
         criteria=NoulCriteria(
             # The examples are the user's, from calypso.toml, in their own language.
             true="Drops it, such as " + ", ".join(f'"{intent}"' for intent in QUIT_INTENTS),
-            false="Asks for something, or is still on the way to asking",
+            false="Asks for something, is still speaking, or wants another try at saying it",
         ),
+    ),
+    "restart": Choice(
+        instructions={
+            "question": (
+                "Is `latest` a request to restart and wait for the speaker to try again? "
+                "If the speaker is already giving their corrected answer, choose neither."
+            ),
+            "examples_of_restart_intent": RESTART_INTENTS,
+        },
+        criteria={
+            "conversation": "Start the entire conversation from the beginning. A bare 'start over' means this.",
+            "answer": "Rephrase, correct or try saying just the current answer again.",
+            "neither": (
+                "Ordinary speech, including quoting a phrase, asking about restarting a device, "
+                "or continuing the answer with a correction."
+            ),
+        },
     ),
     **{f"command {i}": fits(command) for i, command in enumerate(COMMANDS)},
 }
-
-
-def judge(sentence):
-    """Ask Jev whether the user has finished, quits, and which command they want.
-
-    Returns (finished, quits, command), where command is the best fit among
-    COMMANDS, or None if even that isn't a good enough fit.
-    """
-    nouls = jev.system_one(state=sentence, questions=JUDGMENTS).nouls
-    finished, quits = nouls["finished"].noul, nouls["quits"].noul
-    command, score = max(
-        ((cmd, nouls[f"command {i}"].noul) for i, cmd in enumerate(COMMANDS)),
-        key=lambda match: match[1], default=(None, 0),
-    )
-    log.debug(
-        f"Jev on {sentence!r}: {finished:.0%} finished, {quits:.0%} quitting, "
-        f"best command {score:.0%}: {command['description'] if command else 'none'}"
-    )
-    matched = command if score > JEV_THRESHOLD else None
-    return finished > JEV_THRESHOLD, quits > JEV_THRESHOLD, matched
 
 
 # Follow-ups and standalone dictation can be complete without being requests.
@@ -149,16 +150,54 @@ DICTATION = {
         ),
     ),
     "quits": JUDGMENTS["quits"],
+    "restart": JUDGMENTS["restart"],
 }
 
 
-def judge_dictation(asked, said):
-    """Judge a copy of the answer. Keep the original transcript for the command."""
-    state = {"asked": asked, "said": said.rstrip(". ")}
-    nouls = jev.system_one(state=state, questions=DICTATION).nouls
-    finished, quits = nouls["finished"].noul, nouls["quits"].noul
-    log.debug(f"Jev on {said!r}: {finished:.0%} finished, {quits:.0%} quitting")
-    return finished > JEV_THRESHOLD, quits > JEV_THRESHOLD, None
+COHERENT = Noul(
+    instructions=(
+        "Can you make sense of what the speaker is trying to say in `latest`, either on its own "
+        "or as a continuation of `earlier`? Use `asked` as context if present. "
+        "Incomplete but intelligible speech counts as yes."
+    ),
+)
+
+
+def judge(state):
+    """Decide what to do with this turn in one Jev call. Only opening requests match commands."""
+    opening = "asked" not in state
+    questions = JUDGMENTS if opening else DICTATION
+    if "earlier" in state:
+        questions = questions | {"coherent": COHERENT}
+    # ASR often adds a full stop to unfinished dictation. Change only Jev's copy.
+    judged = state if opening else state | {"said": state["said"].rstrip(". ")}
+    response = jev.system_one(state=judged, questions=questions)
+    scores = {key: answer.noul for key, answer in response.nouls.items()}
+    restart = response.choices["restart"]
+    probability = restart.probabilities[restart.choice]
+    log.debug(
+        "Jev on %r: %.0f%% finished, %.0f%% quitting, restart %s %.0f%%",
+        state["said"], 100 * scores["finished"], 100 * scores["quits"], restart.choice, 100 * probability,
+    )
+
+    if scores["quits"] > JEV_THRESHOLD:
+        return "quit", None
+    if restart.choice != "neither" and probability > JEV_THRESHOLD:
+        return restart.choice, None
+
+    if "coherent" in scores:
+        log.debug("Accumulated speech %.0f%% intelligible", 100 * scores["coherent"])
+        if scores["coherent"] < MIN_COHERENCE:
+            return "ask_again", None
+
+    finished = scores["finished"] > JEV_THRESHOLD
+    if opening and COMMANDS:
+        best = max(range(len(COMMANDS)), key=lambda i: scores[f"command {i}"])
+        score = scores[f"command {best}"]
+        log.debug("Best command %.0f%%: %s", 100 * score, COMMANDS[best]["description"])
+        if finished and score > JEV_THRESHOLD:
+            return "finished", COMMANDS[best]
+    return ("finished" if finished else "continue"), None
 
 
 class Patience(TranscriptEventListener):
@@ -229,27 +268,42 @@ class Patience(TranscriptEventListener):
                     self._schedule(*self.pending)
 
 
-def listen(d, patience, prompt, judge):
-    """Collect one turn, judging all its fragments together after every pause."""
+def listen(d, patience, prompt, *, opening=False):
+    """Collect one turn. A retry discards its fragments and starts a fresh silence timer."""
     if prompt:
         yield d.say(prompt)
     sentence = ""
     while True:
-        # Playback has finished. The user has the full silence allowance.
         with patience.waiting(prompt, sentence):
             fragment = yield d.ask("")
-        sentence = f"{sentence} {fragment}" if sentence else fragment
-        finished, quits, command = judge(sentence)
-        if quits:
+        state = {"latest": fragment, "said": fragment}
+        if sentence:
+            state.update(earlier=sentence, said=f"{sentence} {fragment}")
+        if not opening:
+            state["asked"] = prompt
+        sentence = state["said"]
+        action, command = judge(state)
+        if action == "quit":
             yield d.say(one_of("quit_ack", sentence))
             return None, None
-        if finished:
+        if action == "finished":
             return sentence, command
+        if action == "conversation":
+            yield d.say(one_of("restart_ack", sentence))
+            d.restart()
+        if action == "answer":
+            yield d.say(one_of("rephrase_ack", sentence))
+            if prompt:
+                yield d.say(prompt)
+            sentence = ""
+        elif action == "ask_again":
+            yield d.say(one_of("ask_again", sentence))
+            sentence = ""
 
 
 def converse(d, patience, mute):
     """Match one opening request, then follow its steps in this same Dialog."""
-    speech, command = yield from listen(d, patience, one_of("trigger_ack"), judge)
+    speech, command = yield from listen(d, patience, one_of("trigger_ack"), opening=True)
     if speech is None:
         return
     if command is None:
@@ -260,7 +314,7 @@ def converse(d, patience, mute):
     for index, step in enumerate(command["steps"], 1):
         if "ask" in step:
             prompt = config.fill(step["ask"], CONFIG, speech, answers)
-            answer, _ = yield from listen(d, patience, prompt, partial(judge_dictation, prompt))
+            answer, _ = yield from listen(d, patience, prompt)
             if answer is None:
                 return
             answers[step["save_as"]] = answer
@@ -296,6 +350,16 @@ def setup(debug):
     log.setLevel(logging.DEBUG if debug else logging.INFO)
 
 
+class CalypsoAgent(AgentFlow):
+    def _match_trigger(self, utterance):
+        # Moonshine 0.1.6 intercepts even paraphrases of "start over" before
+        # Dialog.ask receives them. Let Jev distinguish the two restart scopes.
+        kind, phrase = super()._match_trigger(utterance)
+        if (kind, phrase) == ("global", "start over"):
+            return None, None
+        return kind, phrase
+
+
 @contextlib.contextmanager
 def assistant(debug=False):
     """Her voice, her ears and an agent using them, all closed afterwards.
@@ -314,7 +378,7 @@ def assistant(debug=False):
     mic.load()
 
     agent = (
-        AgentFlow()
+        CalypsoAgent()
         .language(CONFIG["user_language"])
         .use_text_to_speech(voice)
         .use_mic_transcriber(mic)

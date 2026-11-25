@@ -2,16 +2,16 @@
 
 import os
 import unittest
+from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from moonshine_voice import AgentFlow
-
 with patch.dict(os.environ, TYPESAFE_API_KEY="offline-test"):
     import main
+    import cli
 import config
 
 
@@ -23,7 +23,7 @@ class ConversationTests(unittest.TestCase):
         self.mic_muting = []
         self.steps = [{"run": "true"}]
         self.agent = (
-            AgentFlow().microphone(False).speech(False).use_embeddings(False).beeps(False)
+            main.CalypsoAgent().microphone(False).speech(False).use_embeddings(False).beeps(False)
             .speak_with(self.spoken.append).on_error(self.errors.append)
         )
         self.patience = main.Patience(self.agent)
@@ -32,8 +32,9 @@ class ConversationTests(unittest.TestCase):
         self.addCleanup(self.agent.cancel)
         self.enterContext(patch("main.CONFIG", config.DEFAULTS))
         self.enterContext(patch("main.threading.Timer", side_effect=self.timer))
-        self.entry = self.enterContext(patch("main.judge", side_effect=self.judge_request))
-        self.answers = self.enterContext(patch("main.judge_dictation", side_effect=self.judge_answer))
+        self.command = {"description": "Test command", "steps": self.steps}
+        self.enterContext(patch("main.COMMANDS", [self.command]))
+        self.jev = self.enterContext(patch.object(main.jev, "system_one", side_effect=self.score))
 
     def timer(self, seconds, callback):
         # fire() may be called after cancel() to exercise a callback already in flight.
@@ -41,12 +42,21 @@ class ConversationTests(unittest.TestCase):
         self.timers.append(timer)
         return timer
 
-    def judge_request(self, said):
-        command = {"description": "Test command", "steps": self.steps}
-        return True, False, None if said == "unmatched request" else command
-
-    def judge_answer(self, asked, said):
-        return not said.endswith("..."), said.endswith("forget it"), None
+    def score(self, *, state, questions):
+        self.command["steps"] = self.steps
+        latest = state["latest"]
+        probabilities = {key: 0.0 for key in questions if key != "restart"}
+        probabilities["finished"] = float(not latest.endswith("...") and latest != "Search on the")
+        probabilities["quits"] = float(latest == "forget it")
+        if "command 0" in questions:
+            probabilities["command 0"] = float(state["said"] != "unmatched request")
+        if "coherent" in questions:
+            probabilities["coherent"] = float(latest != "word salad")
+        restart = {"start over": "conversation", "let me say that again": "answer"}.get(latest, "neither")
+        return SimpleNamespace(
+            nouls={key: SimpleNamespace(noul=p) for key, p in probabilities.items()},
+            choices={"restart": SimpleNamespace(choice=restart, probabilities={restart: 1.0})},
+        )
 
     def hear(self, *lines):
         for line in lines:
@@ -72,7 +82,10 @@ class ConversationTests(unittest.TestCase):
             self.hear("I'd like...")
             self.timers[-1].fire()
             self.hear("to travel...")
-            self.assertEqual(self.answers.call_args.args, ("When for Menorca?", "I'd like... to travel..."))
+            state = self.jev.call_args.kwargs["state"]
+            self.assertEqual(state["asked"], "When for Menorca?")
+            self.assertEqual(state["earlier"], "I'd like...")
+            self.assertEqual(state["latest"], "to travel...")
             self.assertFalse(out.exists())
             self.assertNotIn("What activity?", self.spoken)
             self.hear("next June")
@@ -84,7 +97,7 @@ class ConversationTests(unittest.TestCase):
             self.hear("open the calendar")
             self.assertEqual(out.read_text(), activity + "|open the calendar|save a trip")
             self.assertEqual(self.spoken[-1], "Saved Menorca for I'd like... to travel... next June.")
-            self.assertEqual(self.entry.call_count, 1)
+            self.assertEqual(sum("command 0" in call.kwargs["questions"] for call in self.jev.call_args_list), 1)
             self.assertEqual(self.mic_muting, [True, False, True, False])
             self.assertFalse(self.agent.is_active)
 
@@ -114,19 +127,18 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("Done", self.spoken)
 
     def test_a_matching_opening_fragment_waits_for_completion(self):
-        command = {"description": "Search", "steps": [{"ask": "Search for what?", "save_as": "query"}]}
-        self.entry.side_effect = [(False, False, command), (True, False, command)]
+        self.steps = [{"ask": "Search for what?", "save_as": "query"}]
         self.hear("Calypso", "Search on the")
         self.assertNotIn("Search for what?", self.spoken)
         self.timers[-1].fire()
         self.hear("internet")
-        self.assertEqual(self.entry.call_args.args, ("Search on the internet",))
+        self.assertEqual(self.jev.call_args.kwargs["state"]["said"], "Search on the internet")
         self.assertEqual(self.spoken[-1], "Search for what?")
         self.timers[-1].fire()
         self.assertEqual(self.spoken[-2:], ["Search for what?", "Search for what?"])
         self.timers[-1].fire()
         self.assertFalse(self.agent.is_active)
-        self.answers.assert_not_called()
+        self.assertEqual(self.jev.call_count, 2)
 
     def test_quit_and_restart_discard_answers(self):
         self.steps = [
@@ -137,9 +149,61 @@ class ConversationTests(unittest.TestCase):
         self.hear("Calypso", "plan", "Rome", "forget it")
         self.assertEqual(self.spoken[-1], main.one_of("quit_ack", "forget it"))
         self.assertFalse(self.agent.is_active)
-        self.hear("Calypso", "plan", "Paris", "start over", "plan", "London", "tomorrow")
+        self.hear("Calypso", "plan", "Paris", "start over")
+        self.assertEqual(self.spoken[-2:], [main.one_of("restart_ack"), main.one_of("trigger_ack")])
+        self.hear("plan", "London", "tomorrow")
         self.assertEqual(self.spoken[-1], "Saved London tomorrow")
         self.assertFalse(self.agent.is_active)
+
+    def test_rephrasing_and_garbled_replies_retry_only_the_current_question(self):
+        self.steps = [
+            {"ask": "Where?", "save_as": "place"},
+            {"ask": "When for $place?", "save_as": "date"},
+            {"say": "Saved $place $date"},
+        ]
+        self.hear("Calypso", "plan", "Paris", "I might...", "let me say that again")
+        self.assertEqual(self.spoken[-2:], [main.one_of("rephrase_ack"), "When for Paris?"])
+        self.hear("garbled...")
+        self.assertNotIn("earlier", self.jev.call_args.kwargs["state"])
+        self.assertNotIn("coherent", self.jev.call_args.kwargs["questions"])
+        stale = self.timers[-1]
+        self.hear("word salad")
+        self.assertEqual(self.spoken[-1], main.one_of("ask_again"))
+        stale.fire()
+        self.hear("tomorrow")
+        self.assertEqual(self.jev.call_args.kwargs["state"]["asked"], "When for Paris?")
+        self.assertNotIn("earlier", self.jev.call_args.kwargs["state"])
+        self.assertEqual(self.spoken[-1], "Saved Paris tomorrow")
+
+    def test_garbled_opening_retries_without_another_wake_word(self):
+        self.steps = [{"say": "Heard $speech"}]
+        self.hear("Calypso", "garbled...", "word salad")
+        self.assertTrue(self.agent.is_active)
+        self.assertEqual(self.spoken[-1], main.one_of("ask_again"))
+        self.hear("another request")
+        self.assertEqual(self.spoken[-1], "Heard another request")
+
+    def test_standalone_dictation_finishes_after_restarts_and_a_garbled_pair(self):
+        @contextmanager
+        def assistant(debug):
+            dispatch = self.agent.handle_utterance
+
+            def dictate(trigger):
+                dispatch(trigger)
+                for text in ("start over", "let me say that again", "garbled...", "word salad", "fresh text"):
+                    self.patience.on_line_started(None)
+                    dispatch(text)
+                    self.assertEqual(self.errors, [])
+
+            with patch.object(self.agent, "start_listening"), patch.object(self.agent, "handle_utterance", dictate):
+                yield self.agent, self.patience, self.mic_muting.append
+
+        with patch.object(main, "assistant", assistant):
+            self.assertEqual(cli.transcribe("What text?", False), "fresh text")
+        self.assertEqual(self.spoken, [
+            "What text?", main.one_of("restart_ack"), "What text?",
+            main.one_of("rephrase_ack"), "What text?", main.one_of("ask_again"),
+        ])
 
     def test_blank_recognition_resumes_the_current_deadline(self):
         self.hear("Calypso")
@@ -164,6 +228,23 @@ class ConversationTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_existing_config_gets_recovery_defaults_and_saves_custom_phrase_lists(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "calypso.toml"
+            path.write_text('assistant_name = "Calypso"\n')
+            with patch.object(config, "PATH", path):
+                settings = config.load()
+                self.assertIn("let me say that again", settings["restart_intent"])
+                self.assertEqual(settings["ask_again"], ["I don't get it, could you say it again?"])
+                settings["restart_intent"] = ["from the top", "I'll reword it"]
+                settings["ask_again"] = ["One more time?", "I heard $speech. Say it again?"]
+                config.save(settings)
+                saved = config.load()
+                self.assertEqual(saved["restart_intent"], settings["restart_intent"])
+                self.assertEqual(saved["ask_again"], settings["ask_again"])
+                with patch("config.random.choice", return_value=saved["ask_again"][1]):
+                    self.assertEqual(config.one_of(saved, "ask_again", "noise"), "I heard noise. Say it again?")
+
     def test_unknown_ambiguous_and_legacy_steps(self):
         ask = {"ask": "Where?", "save_as": "place"}
         for steps in ([], [{"ask": "Where?"}], [ask, ask], [{"say": "$later"}],

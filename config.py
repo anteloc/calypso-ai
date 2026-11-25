@@ -32,11 +32,15 @@ DEFAULTS = {
     "assistant_voice": "kokoro_bf_isabella",
     "trigger": "$assistant_name",
     "quit_intent": ["nah, forget it", "leave it be", "better don't do anything"],
+    "restart_intent": ["start over", "let's begin from the beginning", "let me say that again", "let me rephrase that"],
     "trigger_ack": ["Yes?"],
     "nudge": ["And...?"],
     "goodbye": ["Ok, call me if you need something else."],
     "quit_ack": ["Sure! We'll leave it here."],
     "dont_know": ["I don't know how to do that."],
+    "ask_again": ["I don't get it, could you say it again?"],
+    "restart_ack": ["Let's start the whole conversation over."],
+    "rephrase_ack": ["Let's try just this question again."],
 }
 
 # Her phrases: each setting is a list, and she says one of them, picked at random.
@@ -46,11 +50,15 @@ PHRASES = {
     "goodbye": "What she says when she stops waiting for the rest:",
     "quit_ack": "What she says when you call it off:",
     "dont_know": "What she says when no command does what you asked:",
+    "ask_again": "What she says when the transcript is garbled and she needs you to repeat it:",
+    "restart_ack": "What she says when restarting the whole conversation:",
+    "rephrase_ack": "What she says when retrying just the current question:",
 }
 
-# The settings that are lists of phrases: hers, and the quit_intent examples.
-LISTS = (*PHRASES, "quit_intent")
+# Her spoken replies and the user's examples of voice controls are lists.
+LISTS = (*PHRASES, "quit_intent", "restart_intent")
 QUIT_QUESTION = "What you say to call a request off (examples, separated by |):"
+RESTART_QUESTION = "What you say to start over (examples, separated by |):"
 
 TRIES = 3  # Times you say the trigger when testing it.
 TRY_FOR = 15  # Seconds she waits for each try.
@@ -148,6 +156,7 @@ def configure():
         )
         settings["trigger"] = ask(TRIGGER_QUESTION, settings["trigger"], required=True)
         settings["quit_intent"] = ask_phrases(QUIT_QUESTION, settings["quit_intent"])
+        settings["restart_intent"] = ask_phrases(RESTART_QUESTION, settings["restart_intent"])
         print(
             "\nHer phrases: give several by separating them with |, and she picks one at random.\n"
             "$user_name and $assistant_name stand for the names, anywhere in a phrase."
